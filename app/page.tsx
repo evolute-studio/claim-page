@@ -1,28 +1,34 @@
-import { redirect } from 'next/navigation';
+'use client';
 
-export default function Home({
-  searchParams,
-}: {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
-}) {
-  // This is a server component, redirect happens on the server
-  // If user comes to root with a token, redirect to claim page
-  // Otherwise show a simple landing
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { usePrivy } from '@privy-io/react-auth';
+
+export default function Home() {
+  const router = useRouter();
+  const { ready, authenticated, login } = usePrivy();
+
+  useEffect(() => {
+    if (!ready || !authenticated) return;
+    router.replace('/app');
+  }, [ready, authenticated, router]);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4">
-      <div className="text-center space-y-6">
-        <h1 className="text-4xl font-bold text-white">Evolute</h1>
-        <p className="text-gray-400 max-w-md">
-          Tournament prize claim portal. Use the claim link provided to you to claim your USDC
-          prize.
+    <main className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="w-full max-w-md rounded-xl border border-gray-800 bg-gray-900/40 p-8 text-center space-y-4">
+        <h1 className="text-3xl font-bold text-white">Evolute Wallet</h1>
+        <p className="text-sm text-gray-400">
+          Sign in with Privy to view your USDC wallet and claim your payouts.
         </p>
-        <div className="bg-gray-800/50 rounded-lg p-4">
-          <p className="text-sm text-gray-400">
-            Looking for your claim link? Check your email from Evolute tournaments.
-          </p>
-        </div>
+        <button
+          type="button"
+          onClick={login}
+          disabled={!ready}
+          className="w-full rounded-md bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-purple-500 disabled:opacity-50"
+        >
+          {ready ? 'Sign in with Privy' : 'Loading...'}
+        </button>
       </div>
-    </div>
+    </main>
   );
 }

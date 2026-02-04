@@ -3,8 +3,8 @@ import { PrivyProviderWrapper } from '@/lib/privy';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Claim Prize | Evolute',
-  description: 'Claim your USDC prize from Evolute tournaments',
+  title: 'Evolute Wallet',
+  description: 'Wallet-first dashboard for USDC payouts and claims',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

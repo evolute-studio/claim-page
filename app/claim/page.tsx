@@ -5,7 +5,6 @@ import {
   getIdentityToken,
   useIdentityToken,
   usePrivy,
-  useUser,
   useWallets,
 } from '@privy-io/react-auth';
 import { UserPill } from '@privy-io/react-auth/ui';
@@ -16,19 +15,6 @@ import { ClaimCard } from '@/components/ClaimCard';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { PayoutPreview } from '@/types/payout';
 
-function decodeJwtPayloadSafe(token: string): Record<string, unknown> | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length < 2) return null;
-    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
-    const json = atob(padded);
-    return JSON.parse(json) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
 function ClaimContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -36,46 +22,53 @@ function ClaimContent() {
 
   const { ready, authenticated, login } = usePrivy();
   const { identityToken } = useIdentityToken();
-  const { user } = useUser();
   const { wallets } = useWallets();
 
   const [preview, setPreview] = useState<PayoutPreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const autoLoginAttemptedRef = useRef(false);
+  const previewRequestIdRef = useRef(0);
   const [manualToken, setManualToken] = useState('');
 
   const walletAddress = wallets[0]?.address;
 
   // Load preview on mount
   useEffect(() => {
+    const requestId = ++previewRequestIdRef.current;
+    const controller = new AbortController();
+
     if (!token) {
+      setPreview(null);
+      setError(null);
       setLoading(false);
+      controller.abort();
       return;
     }
 
-    getClaimPreview(token)
-      .then(setPreview)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+    setLoading(true);
+    setError(null);
+
+    getClaimPreview(token, { signal: controller.signal })
+      .then((data) => {
+        if (previewRequestIdRef.current !== requestId) return;
+        setPreview(data);
+      })
+      .catch((e: unknown) => {
+        if (previewRequestIdRef.current !== requestId) return;
+        if (e instanceof Error && e.name === 'AbortError') return;
+        setPreview(null);
+        setError(e instanceof Error ? e.message : 'Failed to load claim');
+      })
+      .finally(() => {
+        if (previewRequestIdRef.current !== requestId) return;
+        setLoading(false);
+      });
+
+    return () => {
+      controller.abort();
+    };
   }, [token]);
-
-  // No auto-login: user initiates login via button
-  useEffect(() => {
-    if (!ready || authenticated) return;
-    autoLoginAttemptedRef.current = false;
-  }, [ready, authenticated]);
-
-  // Persist login for wallet access
-  useEffect(() => {
-    if (!ready || !authenticated) return;
-    try {
-      localStorage.setItem('privy_logged_in', 'true');
-    } catch {
-      // Ignore storage errors (e.g. private mode)
-    }
-  }, [ready, authenticated]);
 
   const handleTokenSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -97,51 +90,13 @@ function ClaimContent() {
     setError(null);
 
     try {
-      const email = user?.email?.address ?? user?.google?.email ?? null;
-      console.info('[claim] user email presence', {
-        hasEmail: !!email,
-        emailFrom: user?.email?.address ? 'email' : user?.google?.email ? 'google' : 'none',
-      });
-      if (!email) {
-        throw new Error('Email is required. Please login with email or Google.');
-      }
-
       const privyIdentityToken = identityToken ?? (await getIdentityToken());
-      console.info('[claim] identity token presence', {
-        hasIdentityToken: !!privyIdentityToken,
-      });
       if (!privyIdentityToken) {
         throw new Error('Missing identity token. Please re-login.');
       }
 
-      const decoded = decodeJwtPayloadSafe(privyIdentityToken);
-      const decodedKeys = decoded ? Object.keys(decoded) : [];
-      let linkedAccountsHasEmail = false;
-      if (decoded && typeof decoded.linked_accounts === 'string') {
-        try {
-          const accounts = JSON.parse(decoded.linked_accounts) as Array<{
-            type?: string;
-            email?: string;
-            address?: string;
-          }>;
-          linkedAccountsHasEmail = accounts.some(
-            (account) => account.type === 'email' || typeof account.email === 'string'
-          );
-        } catch {
-          linkedAccountsHasEmail = false;
-        }
-      }
-      console.info('[claim] identity token claims', {
-        keys: decodedKeys,
-        hasLinkedAccounts: decodedKeys.includes('linked_accounts'),
-        linkedAccountsHasEmail,
-      });
-
       await confirmClaim(token, walletAddress, privyIdentityToken);
-
-      // Refresh preview to show new status
-      const updated = await getClaimPreview(token);
-      setPreview(updated);
+      router.replace(`/app?focusToken=${encodeURIComponent(token)}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Claim failed');
     } finally {

@@ -21,10 +21,18 @@ interface ClaimCardProps {
 }
 
 function formatTimeRemaining(expiresAt: number): string {
+  // Backend may return Unix seconds or milliseconds; normalize to ms.
+  const expiresAtMs = expiresAt < 1_000_000_000_000 ? expiresAt * 1000 : expiresAt;
   const now = Date.now();
-  const diff = expiresAt - now;
+  const diff = expiresAtMs - now;
 
   if (diff <= 0) return 'Expired';
+
+  const totalMinutes = Math.floor(diff / (1000 * 60));
+  if (totalMinutes < 60) {
+    const minutes = Math.max(totalMinutes, 1);
+    return `Expires in ${minutes} minute${minutes > 1 ? 's' : ''}`;
+  }
 
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
