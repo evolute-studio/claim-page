@@ -1,8 +1,8 @@
 'use client';
 
 import { PrivyProvider } from '@privy-io/react-auth';
-import { base } from 'viem/chains';
 import { SUPPORTED_CHAINS } from '@/lib/chains';
+import { getSourceChain } from '@/lib/cctp';
 
 const PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 
@@ -37,7 +37,7 @@ export function PrivyProviderWrapper({ children }: { children: React.ReactNode }
           },
           showWalletUIs: true,
         },
-        defaultChain: base,
+        defaultChain: getSourceChain(),
         supportedChains: SUPPORTED_CHAINS,
       }}
     >

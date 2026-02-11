@@ -4,6 +4,15 @@ import {
   ConfirmResponse,
   StatusResponse,
 } from '@/types/payout';
+import type {
+  BurnSubmittedResponse,
+  CreateWithdrawalResponse,
+  DestinationChain,
+  WithdrawalQuoteResponse,
+  WithdrawalListItem,
+  WithdrawalListResponse,
+  WithdrawalStatusResponse,
+} from '@/types/withdrawal';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -15,6 +24,131 @@ function getApiBaseOrThrow(): string {
     );
   }
   return value.replace(/\/+$/, '');
+}
+
+function getAuthHeaders(privyIdentityToken: string): HeadersInit {
+  return {
+    Authorization: `Bearer ${privyIdentityToken}`,
+  };
+}
+
+const DEST_DOMAIN_BY_CHAIN: Record<DestinationChain, number> = {
+  base: 6,
+  ethereum: 0,
+  arbitrum: 3,
+  optimism: 2,
+  polygon: 7,
+  avalanche: 1,
+  linea: 11,
+};
+
+function toApiDestChain(chain: DestinationChain): string {
+  return chain === 'optimism' ? 'op' : chain;
+}
+
+function toUiDestChain(chain: unknown, fallback: DestinationChain): DestinationChain {
+  if (typeof chain !== 'string') return fallback;
+  if (chain === 'op') return 'optimism';
+  if (chain === 'optimism') return 'optimism';
+  if (chain === 'base') return 'base';
+  if (chain === 'ethereum') return 'ethereum';
+  if (chain === 'arbitrum') return 'arbitrum';
+  if (chain === 'polygon') return 'polygon';
+  if (chain === 'avalanche') return 'avalanche';
+  if (chain === 'linea') return 'linea';
+  return fallback;
+}
+
+function toNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function normalizeWithdrawalQuote(
+  raw: Record<string, unknown>,
+  fallbackDestChain: DestinationChain
+): WithdrawalQuoteResponse {
+  const destChain = toUiDestChain(raw.dest_chain, fallbackDestChain);
+  const destDomainId =
+    toNumber(raw.dest_domain_id ?? raw.destDomainId) || DEST_DOMAIN_BY_CHAIN[destChain];
+
+  const transferAmount =
+    toNumber(raw.transfer_amount_usdc_minor ?? raw.amount_minor ?? raw.net_amount_minor) || 0;
+  const feeProtocol =
+    toNumber(raw.fee_protocol_usdc_minor ?? raw.bridge_fee_minor) || 0;
+  const feeForward =
+    toNumber(raw.fee_forward_usdc_minor ?? raw.forward_fee_minor) || 0;
+  const maxFee =
+    toNumber(raw.max_fee_usdc_minor ?? raw.total_fee_minor) || feeProtocol + feeForward;
+  const totalBurn =
+    toNumber(raw.total_burn_usdc_minor) || transferAmount + maxFee;
+
+  const quoteId = typeof raw.quote_id === 'string' ? raw.quote_id : '';
+  if (!quoteId) {
+    throw new Error('Quote response missing quote_id');
+  }
+
+  return {
+    quote_id: quoteId,
+    source_chain: 'base',
+    source_domain_id: 6,
+    dest_chain: destChain,
+    dest_domain_id: destDomainId,
+    transfer_amount_usdc_minor: transferAmount,
+    finality_threshold: toNumber(raw.finality_threshold ?? raw.finalityThreshold) || 1000,
+    forward_fee_level: (raw.forward_fee_level as WithdrawalQuoteResponse['forward_fee_level']) ?? 'med',
+    fee_protocol_usdc_minor: feeProtocol,
+    fee_forward_usdc_minor: feeForward,
+    max_fee_usdc_minor: maxFee,
+    total_burn_usdc_minor: totalBurn,
+    expires_at: toNumber(raw.expires_at ?? raw.expiresAt),
+  };
+}
+
+function normalizeWithdrawal(raw: Record<string, unknown>): WithdrawalListItem | null {
+  const id = readStringField(raw, ['withdrawal_id', 'id', 'withdrawalId']);
+  const status = readStringField(raw, ['status', 'state']) as WithdrawalListItem['status'] | undefined;
+  const destChain = toUiDestChain(raw.dest_chain ?? raw.chain, 'ethereum');
+
+  if (!id || !status) return null;
+
+  const transferAmount =
+    toNumber(
+      raw.net_amount_minor ??
+        raw.amount_minor ??
+        raw.transfer_amount_usdc_minor ??
+        raw.amount
+    ) || 0;
+  const feeProtocol = toNumber(raw.fee_protocol_usdc_minor ?? raw.bridge_fee_minor) || 0;
+  const feeForward = toNumber(raw.fee_forward_usdc_minor ?? raw.forward_fee_minor) || 0;
+  const maxFee =
+    toNumber(raw.max_fee_usdc_minor ?? raw.total_fee_minor) || feeProtocol + feeForward;
+  const totalBurn =
+    toNumber(raw.total_burn_usdc_minor ?? raw.total_amount_minor) || transferAmount + maxFee;
+
+  return {
+    id,
+    status,
+    dest_chain: destChain,
+    dest_address: readStringField(raw, ['dest_address', 'destination_address', 'to', 'recipient']) ?? null,
+    transfer_amount_usdc_minor: transferAmount,
+    total_burn_usdc_minor: totalBurn,
+    max_fee_usdc_minor: maxFee,
+    fee_forward_usdc_minor: feeForward,
+    fee_protocol_usdc_minor: feeProtocol,
+    burn_tx_hash: readStringField(raw, ['burn_tx_hash', 'burnTxHash', 'tx_hash']) ?? null,
+    forward_tx_hash: readStringField(raw, ['forward_tx_hash', 'forwardTxHash']) ?? null,
+    created_at: toNumber(raw.created_at ?? raw.createdAt) || null,
+    updated_at: toNumber(raw.updated_at ?? raw.updatedAt) || null,
+    burn_tx_at: toNumber(raw.burn_tx_at ?? raw.burnTxAt) || null,
+    forward_tx_at: toNumber(raw.forward_tx_at ?? raw.forwardTxAt) || null,
+    failure_reason:
+      readStringField(raw, ['failure_reason', 'failureReason', 'error', 'error_msg']) ?? null,
+  };
 }
 
 function readStringField(record: Record<string, unknown>, keys: string[]): string | undefined {
@@ -183,6 +317,153 @@ export async function getMyPayouts(
 
   return {
     payouts,
+    next_cursor: data.next_cursor ?? null,
+  };
+}
+
+export async function getWithdrawalQuote(
+  privyIdentityToken: string,
+  payload: {
+    dest_chain: DestinationChain;
+    transfer_amount_usdc_minor: number;
+  }
+): Promise<WithdrawalQuoteResponse> {
+  const apiBase = getApiBaseOrThrow();
+  const body = {
+    ...payload,
+    dest_chain: toApiDestChain(payload.dest_chain),
+    amount_minor: payload.transfer_amount_usdc_minor,
+  };
+  const res = await fetch(`${apiBase}/withdrawal/quote`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(privyIdentityToken),
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.message || 'Failed to fetch withdrawal quote');
+  }
+  if (!data || typeof data !== 'object') {
+    throw new Error('Invalid quote response');
+  }
+  return normalizeWithdrawalQuote(data as Record<string, unknown>, payload.dest_chain);
+}
+
+export async function createWithdrawal(
+  privyIdentityToken: string,
+  payload: {
+    quote_id: string;
+    dest_address: string;
+  },
+  idempotencyKey?: string
+): Promise<CreateWithdrawalResponse> {
+  const apiBase = getApiBaseOrThrow();
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+    ...getAuthHeaders(privyIdentityToken),
+  };
+  if (idempotencyKey) {
+    headers['Idempotency-Key'] = idempotencyKey;
+  }
+
+  const res = await fetch(`${apiBase}/withdrawal/create`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.message || 'Failed to create withdrawal');
+  }
+  return data;
+}
+
+export async function submitBurnTx(
+  privyIdentityToken: string,
+  withdrawalId: string,
+  burnTxHash: string,
+  idempotencyKey?: string
+): Promise<BurnSubmittedResponse> {
+  const apiBase = getApiBaseOrThrow();
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+    ...getAuthHeaders(privyIdentityToken),
+  };
+  if (idempotencyKey) {
+    headers['Idempotency-Key'] = idempotencyKey;
+  }
+
+  const res = await fetch(`${apiBase}/withdrawal/burn-submitted`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      burn_tx_hash: burnTxHash,
+      withdrawal_id: withdrawalId,
+      id: withdrawalId,
+    }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.message || 'Failed to submit burn transaction');
+  }
+  return data;
+}
+
+export async function getWithdrawalStatus(
+  privyIdentityToken: string,
+  withdrawalId: string
+): Promise<WithdrawalStatusResponse> {
+  const apiBase = getApiBaseOrThrow();
+  const query = new URLSearchParams({
+    id: withdrawalId,
+    withdrawal_id: withdrawalId,
+  }).toString();
+  const res = await fetch(`${apiBase}/withdrawal/get?${query}`, {
+    headers: getAuthHeaders(privyIdentityToken),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.message || 'Failed to load withdrawal status');
+  }
+  return data;
+}
+
+export async function getMyWithdrawals(
+  privyIdentityToken: string,
+  cursor?: string
+): Promise<WithdrawalListResponse> {
+  const apiBase = getApiBaseOrThrow();
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+  const res = await fetch(`${apiBase}/withdrawal/list${query}`, {
+    headers: getAuthHeaders(privyIdentityToken),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.message || 'Failed to load withdrawals');
+  }
+
+  const rawList = Array.isArray(data.withdrawals)
+    ? data.withdrawals
+    : Array.isArray(data.items)
+      ? data.items
+      : Array.isArray(data)
+        ? data
+        : [];
+
+  const withdrawals = rawList
+    .map((item) => (item && typeof item === 'object' ? normalizeWithdrawal(item as Record<string, unknown>) : null))
+    .filter((item): item is WithdrawalListItem => item !== null);
+
+  return {
+    withdrawals,
     next_cursor: data.next_cursor ?? null,
   };
 }

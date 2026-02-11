@@ -231,13 +231,13 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
   };
 
   return (
-    <section className="w-full rounded-xl border border-gray-800 bg-gray-900/40 p-5 space-y-4">
+    <section className="flex h-full min-h-0 w-full flex-col gap-4 rounded-2xl border border-white/10 bg-[#11152a]/75 p-5 shadow-[0_12px_40px_rgba(4,7,20,0.45)] backdrop-blur animate-fade-in-up">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-white">Your payouts</h2>
         <button
           type="button"
           onClick={() => loadPayouts('background')}
-          className="rounded-md border border-gray-700 px-3 py-1.5 text-xs text-gray-200 transition hover:border-gray-500"
+          className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs text-gray-100 transition hover:bg-white/10"
         >
           {refreshing ? 'Refreshing...' : 'Refresh'}
         </button>
@@ -251,8 +251,8 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
             onClick={() => setActiveFilter(filter.value)}
             className={`rounded-full border px-3 py-1 text-xs transition ${
               activeFilter === filter.value
-                ? 'border-purple-500 bg-purple-500/20 text-purple-300'
-                : 'border-gray-700 text-gray-300 hover:border-gray-500'
+                ? 'border-violet-400 bg-violet-500/20 text-violet-200'
+                : 'border-white/15 bg-white/5 text-gray-300 hover:bg-white/10'
             }`}
           >
             {filter.label}
@@ -271,7 +271,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
       ) : visiblePayouts.length === 0 ? (
         <p className="text-sm text-gray-400">No payouts found.</p>
       ) : (
-        <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {visiblePayouts.map((item) => {
             const itemId =
               item.id ?? item.payout_id ?? item.claim_token ?? `${item.status}-${item.expires_at}`;
@@ -288,8 +288,8 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
                 <div
                   className={`rounded-xl border p-4 space-y-3 transition ${
                     isFocused
-                      ? 'border-purple-400 bg-[#15111f]'
-                      : 'border-gray-800 bg-black/40 hover:border-gray-700'
+                      ? 'border-violet-400 bg-[#17122b]'
+                      : 'border-white/10 bg-black/35 hover:border-white/20'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -323,7 +323,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
                         type="button"
                         onClick={() => handleClaim(item)}
                         disabled={isClaiming}
-                        className="flex-1 rounded-md bg-green-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-green-500 disabled:opacity-60"
+                        className="flex-1 rounded-lg bg-gradient-to-r from-emerald-600 to-green-500 px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
                       >
                         {isClaiming ? 'Claiming...' : 'Claim payout'}
                       </button>
@@ -331,7 +331,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
                     <button
                       type="button"
                       onClick={() => setSelectedPayout(item)}
-                      className="rounded-md border border-gray-700 px-3 py-2 text-sm text-gray-200 transition hover:border-gray-500"
+                      className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-gray-100 transition hover:bg-white/10"
                     >
                       Details
                     </button>
@@ -346,7 +346,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
               type="button"
               onClick={loadMore}
               disabled={loadingMore}
-              className="w-full rounded-md border border-gray-700 px-3 py-2 text-sm text-gray-200 transition hover:border-gray-500 disabled:opacity-60"
+              className="w-full rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-gray-100 transition hover:bg-white/10 disabled:opacity-60"
             >
               {loadingMore ? 'Loading more...' : 'Load more payouts'}
             </button>
@@ -355,8 +355,8 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
       )}
 
       {selectedPayout && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-lg rounded-xl border border-gray-800 bg-[#111111] p-5 space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#11152a] p-5 space-y-4 animate-sheet-in">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-semibold text-white">Payout details</h3>
@@ -365,7 +365,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
               <button
                 type="button"
                 onClick={() => setSelectedPayout(null)}
-                className="rounded-md border border-gray-700 px-2.5 py-1 text-xs text-gray-200 transition hover:border-gray-500"
+                className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1 text-xs text-gray-100 transition hover:bg-white/10"
               >
                 Close
               </button>
