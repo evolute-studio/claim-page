@@ -213,6 +213,7 @@ function NetworkIcon({ chainName, size = 16 }: { chainName: string; size?: numbe
 }
 
 type AmountMode = 'receive' | 'pay';
+type WithdrawStep = 1 | 2 | 3 | 4;
 
 export function WalletPanel() {
   const { wallets } = useWallets();
@@ -237,7 +238,7 @@ export function WalletPanel() {
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [balanceRefreshNonce, setBalanceRefreshNonce] = useState(0);
   const [copied, setCopied] = useState(false);
-  const [destinationMenuOpen, setDestinationMenuOpen] = useState(false);
+  const [step, setStep] = useState<WithdrawStep>(1);
   const [withdrawalId, setWithdrawalId] = useState<string | null>(null);
   const [withdrawalStatus, setWithdrawalStatus] = useState<WithdrawalStatus | null>(null);
   const [burnTxHash, setBurnTxHash] = useState<string | null>(null);
@@ -251,6 +252,42 @@ export function WalletPanel() {
     [config.sourceChain]
   );
   const destinationConfig = getDestinationConfig(destination, config.sourceChain);
+  const clampAmountInput = useCallback((raw: string) => {
+    const cleaned = raw.replace(/[^0-9.]/g, '');
+    if (!cleaned) return '';
+    const [wholeRaw = '', fractionRaw = ''] = cleaned.split('.');
+    const whole = wholeRaw.replace(/^0+(?=\d)/, '');
+    const fraction = fractionRaw.slice(0, 6);
+    if (cleaned.includes('.')) {
+      return `${whole || '0'}.${fraction}`;
+    }
+    return whole || '0';
+  }, []);
+  const handleAmountChange = useCallback(
+    (value: string) => {
+      setAmountInput(clampAmountInput(value));
+    },
+    [clampAmountInput]
+  );
+  const appendAmountChar = useCallback(
+    (char: string) => {
+      setAmountInput((current) => {
+        if (char === '.') {
+          if (current.includes('.')) return current;
+          return clampAmountInput(`${current || '0'}.`);
+        }
+        return clampAmountInput(`${current}${char}`);
+      });
+    },
+    [clampAmountInput]
+  );
+  const handleAmountBackspace = useCallback(() => {
+    setAmountInput((current) => {
+      if (!current) return current;
+      if (current.length <= 1) return '';
+      return current.slice(0, -1);
+    });
+  }, []);
   const parsedInputAmount = useMemo(() => {
     const trimmed = amountInput.trim();
     if (!trimmed) return null;
@@ -328,6 +365,17 @@ export function WalletPanel() {
     return token;
   }, [identityToken]);
 
+  const handlePasteAddress = async () => {
+    try {
+      const value = await navigator.clipboard.readText();
+      if (value) {
+        setDestinationAddress(value.trim());
+      }
+    } catch {
+      setFormError('Failed to read clipboard.');
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
 
@@ -389,13 +437,8 @@ export function WalletPanel() {
   }, [destination, destinationChains]);
 
   useEffect(() => {
-    if (!destinationMenuOpen) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setDestinationMenuOpen(false);
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [destinationMenuOpen]);
+    setFormError(null);
+  }, [step]);
 
   useEffect(() => {
     if (destination === 'base') {
@@ -543,12 +586,14 @@ export function WalletPanel() {
   const handleOpenWithdraw = () => {
     setFormError(null);
     setWithdrawOpen(true);
+    setStep(1);
   };
 
   const handleCloseWithdraw = () => {
     if (sending) return;
     setFormError(null);
     setWithdrawOpen(false);
+    setStep(1);
   };
 
   const resetFlow = () => {
@@ -558,7 +603,17 @@ export function WalletPanel() {
     setForwardTxHash(null);
     setFormError(null);
     setSending(false);
+    setStep(1);
   };
+
+  useEffect(() => {
+    if (!withdrawOpen) return;
+    const original = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = original;
+    };
+  }, [withdrawOpen]);
 
   const handleWithdraw = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -725,43 +780,465 @@ export function WalletPanel() {
     }
   };
 
-  if (destinationMenuOpen) {
+  if (withdrawOpen) {
+    const headerTitle = step === 4 ? 'Review' : 'Send';
+    const amountDisplay = amountInput || '0';
+    const amountMuted =
+      !amountInput || amountInput === '0' || amountInput === '0.' || amountInput === '0.0';
     return (
-      <section className="w-full rounded-2xl border border-white/10 bg-[#0a0f1f] p-3 shadow-[0_12px_40px_rgba(4,7,20,0.45)] backdrop-blur animate-fade-in-up">
-        <div className="mb-2 flex items-center justify-between px-1 py-1">
-          <p className="text-base font-semibold text-white">Choose destination</p>
-          <button
-            type="button"
-            onClick={() => setDestinationMenuOpen(false)}
-            className="rounded-md border border-white/10 bg-[#161c33] px-2.5 py-1 text-xs text-gray-200 transition hover:bg-[#1d2542]"
-          >
-            Close
-          </button>
+      <div className="fixed inset-0 z-50 bg-[#0a0a0a]">
+        <div className="relative mx-auto flex h-full w-full max-w-md flex-col px-4 pt-5 pb-8">
+          <form className="flex-1 flex flex-col" onSubmit={handleWithdraw}>
+            <div className="grid grid-cols-3 items-center">
+              <div className="flex items-center">
+                <button
+                  type="button"
+                  onClick={
+                    step > 1
+                      ? () =>
+                          setStep((current) =>
+                            current > 1 ? ((current - 1) as WithdrawStep) : current
+                          )
+                      : handleCloseWithdraw
+                  }
+                  disabled={sending}
+                  className="h-9 w-9 rounded-full bg-white/5 text-white transition hover:bg-white/10 disabled:opacity-60"
+                  aria-label={step > 1 ? 'Go back' : 'Close'}
+                >
+                  ←
+                </button>
+              </div>
+              <div className="text-center text-sm font-semibold text-white">{headerTitle}</div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleCloseWithdraw}
+                  disabled={sending}
+                  className="h-9 w-9 rounded-full bg-white/5 text-white transition hover:bg-white/10 disabled:opacity-60"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {step === 1 && (
+              <div className="flex flex-1 flex-col justify-between pb-6 pt-8 animate-slide-in">
+                <div className="space-y-5 text-center">
+                  <div className="flex items-center justify-center gap-2 text-[11px] text-gray-400">
+                    <button
+                      type="button"
+                      onClick={() => setAmountMode('pay')}
+                      className={`rounded-full border px-3 py-1 transition ${
+                        amountMode === 'pay'
+                          ? 'border-white/40 bg-white/10 text-white'
+                          : 'border-white/10 text-gray-500'
+                      }`}
+                    >
+                      You pay
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAmountMode('receive')}
+                      className={`rounded-full border px-3 py-1 transition ${
+                        amountMode === 'receive'
+                          ? 'border-white/40 bg-white/10 text-white'
+                          : 'border-white/10 text-gray-500'
+                      }`}
+                    >
+                      You receive
+                    </button>
+                  </div>
+
+                  <div className="flex items-baseline justify-center gap-2">
+                    <input
+                      type="text"
+                      inputMode="none"
+                      readOnly
+                      value={amountDisplay}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Backspace') {
+                          event.preventDefault();
+                          handleAmountBackspace();
+                          return;
+                        }
+                        if (event.key === '.') {
+                          event.preventDefault();
+                          appendAmountChar('.');
+                          return;
+                        }
+                        if (/^\\d$/.test(event.key)) {
+                          event.preventDefault();
+                          appendAmountChar(event.key);
+                        }
+                      }}
+                      aria-label="USDC amount"
+                      className={`w-56 bg-transparent text-center text-5xl font-semibold tracking-tight focus:outline-none ${
+                        amountMuted ? 'text-gray-500' : 'text-white'
+                      }`}
+                    />
+                    <span className="text-lg text-gray-500">USDC</span>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    {formattedBalance ?? '0.00'} USDC available
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  {insufficientBalance && (
+                    <div className="rounded-2xl bg-[#ff6b7a] px-4 py-2 text-center text-xs font-semibold text-black">
+                      Insufficient funds
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-4 gap-2">
+                    {[25, 50, 75].map((pct) => (
+                      <button
+                        key={pct}
+                        type="button"
+                        onClick={() => {
+                          if (!balanceMinor) return;
+                          const value = (balanceMinor * BigInt(pct)) / 100n;
+                          handleAmountChange(formatUnits(value, 6));
+                          setAmountMode('pay');
+                        }}
+                        className="rounded-2xl border border-white/10 bg-white/5 py-2 text-sm text-white"
+                      >
+                        {pct}%
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!balanceMinor) return;
+                        handleAmountChange(formatUnits(balanceMinor, 6));
+                        setAmountMode('pay');
+                      }}
+                      className="rounded-2xl border border-white/10 bg-white/5 py-2 text-sm text-white"
+                    >
+                      Max
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setStep(2)}
+                    disabled={!parsedInputAmount || parsedInputAmount <= 0n}
+                    className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
+                  >
+                    Continue
+                  </button>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((value) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => appendAmountChar(String(value))}
+                        className="rounded-2xl bg-[#121212] py-4 text-2xl text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                      >
+                        {value}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => appendAmountChar('.')}
+                      className="rounded-2xl bg-[#121212] py-4 text-2xl text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                    >
+                      .
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => appendAmountChar('0')}
+                      className="rounded-2xl bg-[#121212] py-4 text-2xl text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                    >
+                      0
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAmountBackspace}
+                      className="rounded-2xl bg-[#121212] py-4 text-2xl text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                    >
+                      ⌫
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {step === 2 && (
+              <div className="flex flex-1 flex-col justify-between pb-6 pt-6 animate-slide-in">
+                <div className="space-y-3">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-gray-500">
+                    Choose network
+                  </p>
+                  <div className="space-y-2">
+                    {destinationChains.map((option) => (
+                      <button
+                        key={option.key}
+                        type="button"
+                        onClick={() => setDestination(option.key)}
+                        className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm transition ${
+                          destination === option.key
+                            ? 'border-white/40 bg-white/10 text-white'
+                            : 'border-white/10 bg-[#111111] text-gray-300 hover:bg-white/5'
+                        }`}
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <NetworkIcon chainName={option.label} size={18} />
+                          <span>{option.label}</span>
+                        </span>
+                        {destination === option.key ? <span>✓</span> : null}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setStep(3)}
+                  disabled={!destinationConfig}
+                  className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
+                >
+                  Continue
+                </button>
+              </div>
+            )}
+
+            {step === 3 && (
+              <div className="flex flex-1 flex-col justify-between pb-6 pt-6 animate-slide-in">
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-white/10 bg-[#111111] p-3 text-xs text-gray-300 space-y-1.5">
+                    <p>
+                      Network:{' '}
+                      <span className="text-white">{destinationConfig?.label ?? destination}</span>
+                    </p>
+                    {amountInput && (
+                      <p>
+                        {amountMode === 'receive' ? 'You receive' : 'You pay'}:{' '}
+                        <span className="text-white">{amountInput} USDC</span>
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-[11px] uppercase tracking-[0.2em] text-gray-500">
+                      Destination address
+                    </label>
+                    <div className="mt-3 flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={destinationAddress}
+                        onChange={(event) => setDestinationAddress(event.target.value)}
+                        placeholder="Enter address to send to"
+                        className="w-full rounded-2xl border border-white/10 bg-[#111111] px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/20"
+                      />
+                      <button
+                        type="button"
+                        onClick={handlePasteAddress}
+                        className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-xs text-white transition hover:bg-white/10"
+                      >
+                        Paste
+                      </button>
+                    </div>
+                    {destinationAddress.trim() && isAddress(destinationAddress.trim()) && (
+                      <p className="mt-2 text-[11px] text-emerald-300">Address looks valid</p>
+                    )}
+                  </div>
+                  {formError && <p className="text-xs text-red-400">{formError}</p>}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isAddress(destinationAddress.trim())) {
+                      setFormError('Destination address is invalid');
+                      return;
+                    }
+                    setStep(4);
+                  }}
+                  disabled={!destinationAddress.trim()}
+                  className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
+                >
+                  Preview
+                </button>
+              </div>
+            )}
+
+            {step === 4 && (
+              <div className="flex flex-1 flex-col justify-between pb-6 pt-6 animate-slide-in">
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-white/10 bg-[#111111] p-4 space-y-3">
+                    <div className="text-center">
+                      <p className="text-2xl font-semibold text-white">
+                        {amountMode === 'pay'
+                          ? formatUsdc(toNumberSafe(parsedInputAmount ?? 0n))
+                          : quote
+                            ? formatUsdc(quote.transfer_amount_usdc_minor)
+                            : amountDisplay}{' '}
+                        USDC
+                      </p>
+                      <p className="text-xs text-gray-500">{quoteTimeRemaining}</p>
+                    </div>
+                    <div className="space-y-2 text-sm text-gray-300">
+                      <div className="flex items-center justify-between">
+                        <span>Network</span>
+                        <span className="text-white">
+                          {destinationConfig?.label ?? destination}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>To</span>
+                        <span className="text-white">{destinationAddress.trim() || '—'}</span>
+                      </div>
+                    </div>
+                    <div className="border-t border-white/10 pt-3 space-y-1.5 text-xs text-gray-300">
+                      {quoteLoading ? (
+                        <p>Fetching quote...</p>
+                      ) : quoteError ? (
+                        <p className="text-red-400">{quoteError}</p>
+                      ) : quote ? (
+                        <>
+                          <p>
+                            You pay:{' '}
+                            <span className="text-white">
+                              {amountMode === 'pay'
+                                ? formatUsdc(toNumberSafe(parsedInputAmount ?? 0n))
+                                : formatUsdc(quote.total_burn_usdc_minor)}{' '}
+                              USDC
+                            </span>
+                          </p>
+                          <p>
+                            You receive:{' '}
+                            <span className="text-white">
+                              {amountMode === 'receive'
+                                ? formatUsdc(quote.transfer_amount_usdc_minor)
+                                : formatUsdc(
+                                    Math.max(
+                                      0,
+                                      toNumberSafe(parsedInputAmount ?? 0n) -
+                                        quote.max_fee_usdc_minor
+                                    )
+                                  )}{' '}
+                              USDC
+                            </span>
+                          </p>
+                          <p>
+                            Fees:{' '}
+                            <span className="text-white">
+                              {formatUsdc(quote.max_fee_usdc_minor)} USDC
+                            </span>
+                          </p>
+                        </>
+                      ) : (
+                        <p>Enter amount to get a quote.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {quote && quoteExpired && (
+                    <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-xs text-yellow-300 flex items-center justify-between gap-3">
+                      <span>Quote expired. Refreshing automatically…</span>
+                      <button
+                        type="button"
+                        onClick={() => setQuoteRefreshNonce((value) => value + 1)}
+                        className="rounded-md border border-yellow-500/40 bg-yellow-500/10 px-2 py-1 text-[11px] text-yellow-200 transition hover:bg-yellow-500/20"
+                      >
+                        Refresh now
+                      </button>
+                    </div>
+                  )}
+
+                  {formError && <p className="text-xs text-red-400">{formError}</p>}
+                  {insufficientBalance && (
+                    <p className="text-xs text-yellow-300">
+                      Insufficient USDC balance for this amount.
+                    </p>
+                  )}
+
+                  {(withdrawalId || burnTxHash) && (
+                    <div className="rounded-2xl border border-white/10 bg-[#111111] p-3 text-xs text-gray-300 space-y-1">
+                      <p>
+                        Withdrawal status:{' '}
+                        <span className="text-white">{withdrawalStatus ?? 'CREATED'}</span>
+                      </p>
+                      {burnTxHash && (
+                        <p className="break-all">
+                          {destination === 'base' ? 'Transfer tx:' : 'Burn tx:'}{' '}
+                          <a
+                            className="text-purple-300 hover:underline"
+                            href={`${baseExplorerBase}${burnTxHash}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {burnTxHash}
+                          </a>
+                        </p>
+                      )}
+                      {forwardTxHash && destinationConfig && (
+                        <p className="break-all">
+                          Mint tx:{' '}
+                          <a
+                            className="text-purple-300 hover:underline"
+                            href={`${destinationConfig.explorerTxBase}${forwardTxHash}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {forwardTxHash}
+                          </a>
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setStep(3)}
+                      disabled={sending || isProcessingWithdrawal}
+                      className="w-full rounded-2xl border border-white/15 bg-white/5 py-3 text-sm text-white transition hover:bg-white/10 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={
+                        sending ||
+                        isProcessingWithdrawal ||
+                        !activeWalletAddress ||
+                        !parsedInputAmount ||
+                        !destinationConfig ||
+                        !destinationAddress.trim() ||
+                        quoteLoading ||
+                        !quote ||
+                        quoteExpired ||
+                        insufficientBalance ||
+                        config.errors.length > 0
+                      }
+                      className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
+                    >
+                      {sending
+                        ? 'Submitting...'
+                        : isProcessingWithdrawal
+                          ? 'Processing...'
+                          : 'Confirm'}
+                    </button>
+                  </div>
+
+                  {withdrawalId && forwardTxHash && (
+                    <button
+                      type="button"
+                      onClick={resetFlow}
+                      className="w-full rounded-2xl border border-white/15 bg-white/5 py-3 text-sm text-gray-100 transition hover:bg-white/10"
+                    >
+                      Start new withdrawal
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </form>
         </div>
-        <div className="max-h-[65vh] overflow-y-auto pr-1">
-          {destinationChains.map((option) => (
-            <button
-              key={option.key}
-              type="button"
-              onClick={() => {
-                setDestination(option.key);
-                setDestinationMenuOpen(false);
-              }}
-              className={`mb-1.5 flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-sm transition ${
-                destination === option.key
-                  ? 'bg-violet-500/25 text-white'
-                  : 'bg-[#141a30] text-gray-200 hover:bg-[#1a223d]'
-              }`}
-            >
-              <span className="inline-flex items-center gap-2">
-                <NetworkIcon chainName={option.label} size={18} />
-                <span>{option.label}</span>
-              </span>
-              {destination === option.key ? <span>✓</span> : null}
-            </button>
-          ))}
-        </div>
-      </section>
+      </div>
     );
   }
 
@@ -824,206 +1301,7 @@ export function WalletPanel() {
         >
           Withdraw USDC
         </button>
-      ) : (
-        <form className="space-y-3 border-t border-white/10 pt-4" onSubmit={handleWithdraw}>
-          <div className="flex items-center justify-between">
-            <p className="text-[11px] uppercase tracking-[0.12em] text-gray-400">Withdraw details</p>
-            {quote && (
-              <span className="text-[11px] text-gray-400">
-                Quote {quoteTimeRemaining || '—'}
-              </span>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-gray-400">Amount mode</p>
-              <div className="flex items-center gap-2 text-[11px]">
-                <button
-                  type="button"
-                  onClick={() => setAmountMode('receive')}
-                  className={`rounded-full border px-2.5 py-1 transition ${
-                    amountMode === 'receive'
-                      ? 'border-violet-400 bg-violet-500/20 text-violet-200'
-                      : 'border-white/15 bg-white/5 text-gray-300 hover:bg-white/10'
-                  }`}
-                >
-                  You receive
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAmountMode('pay')}
-                  className={`rounded-full border px-2.5 py-1 transition ${
-                    amountMode === 'pay'
-                      ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
-                      : 'border-white/15 bg-white/5 text-gray-300 hover:bg-white/10'
-                  }`}
-                >
-                  You pay
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-3 grid gap-3">
-              <label className="text-[11px] uppercase tracking-[0.12em] text-gray-500">
-                {amountMode === 'receive' ? 'You receive' : 'You pay'}
-              </label>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={amountInput}
-                onChange={(event) => setAmountInput(event.target.value)}
-                placeholder={amountMode === 'receive' ? 'Amount to receive (USDC)' : 'Amount to pay (USDC)'}
-                className="w-full rounded-xl bg-black/35 border border-white/10 px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500/40"
-              />
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setDestinationMenuOpen(true)}
-            className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-black/35 px-3 py-2.5 text-sm text-white transition hover:bg-white/5"
-          >
-            <span className="inline-flex items-center gap-2">
-              <NetworkIcon chainName={destinationConfig?.label ?? 'Network'} size={18} />
-              <span>{destinationConfig?.label ?? 'Select network'}</span>
-            </span>
-            <span className="text-gray-400">Select</span>
-          </button>
-
-          <input
-            type="text"
-            value={destinationAddress}
-            onChange={(event) => setDestinationAddress(event.target.value)}
-            placeholder="Destination address (0x...)"
-            className="w-full rounded-xl bg-black/35 border border-white/10 px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500/40"
-          />
-
-          <div className="rounded-xl border border-white/10 bg-black/30 p-3 space-y-1.5">
-            <p className="text-xs text-gray-400">Fee breakdown</p>
-            {quoteLoading ? (
-              <p className="text-xs text-gray-300">Fetching quote...</p>
-            ) : quoteError ? (
-              <p className="text-xs text-red-400">{quoteError}</p>
-            ) : quote ? (
-              <>
-                <p className="text-xs text-gray-300">
-                  You pay:{' '}
-                  <span className="text-white">
-                    {amountMode === 'pay'
-                      ? formatUsdc(toNumberSafe(parsedInputAmount ?? 0n))
-                      : formatUsdc(quote.total_burn_usdc_minor)}{' '}
-                    USDC
-                  </span>
-                </p>
-                <p className="text-xs text-gray-300">
-                  You receive:{' '}
-                  <span className="text-white">
-                    {amountMode === 'receive'
-                      ? formatUsdc(quote.transfer_amount_usdc_minor)
-                      : formatUsdc(
-                          Math.max(
-                            0,
-                            toNumberSafe(parsedInputAmount ?? 0n) - quote.max_fee_usdc_minor
-                          )
-                        )}{' '}
-                    USDC
-                  </span>
-                </p>
-                <p className="text-xs text-gray-300">
-                  Protocol fee: <span className="text-white">{formatUsdc(quote.fee_protocol_usdc_minor)} USDC</span>
-                </p>
-                <p className="text-xs text-gray-300">
-                  Forwarding fee: <span className="text-white">{formatUsdc(quote.fee_forward_usdc_minor)} USDC</span>
-                </p>
-                <p className="text-xs text-gray-300">
-                  Max fee: <span className="text-white">{formatUsdc(quote.max_fee_usdc_minor)} USDC</span>
-                </p>
-                <p className="text-xs text-gray-300">
-                  Total burn: <span className="text-white">{formatUsdc(quote.total_burn_usdc_minor)} USDC</span>
-                </p>
-              </>
-            ) : (
-              <p className="text-xs text-gray-400">Enter amount to get a quote.</p>
-            )}
-          </div>
-
-          {quote && quoteExpired && (
-            <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3 text-xs text-yellow-300 flex items-center justify-between gap-3">
-              <span>Quote expired. Refreshing automatically…</span>
-              <button
-                type="button"
-                onClick={() => setQuoteRefreshNonce((value) => value + 1)}
-                className="rounded-md border border-yellow-500/40 bg-yellow-500/10 px-2 py-1 text-[11px] text-yellow-200 transition hover:bg-yellow-500/20"
-              >
-                Refresh now
-              </button>
-            </div>
-          )}
-
-          {formError && <p className="text-xs text-red-400">{formError}</p>}
-          {insufficientBalance && (
-            <p className="text-xs text-yellow-300">Insufficient USDC balance for this amount.</p>
-          )}
-
-          {(withdrawalId || burnTxHash) && (
-            <div className="rounded-lg border border-white/10 bg-black/30 p-3 text-xs text-gray-300 space-y-1">
-              <p>Withdrawal status: <span className="text-white">{withdrawalStatus ?? 'CREATED'}</span></p>
-              {burnTxHash && (
-                <p className="break-all">
-                  {destination === 'base' ? 'Transfer tx:' : 'Burn tx:'}{' '}
-                  <a className="text-purple-300 hover:underline" href={`${baseExplorerBase}${burnTxHash}`} target="_blank" rel="noreferrer">{burnTxHash}</a>
-                </p>
-              )}
-              {forwardTxHash && destinationConfig && (
-                <p className="break-all">
-                  Mint tx: <a className="text-purple-300 hover:underline" href={`${destinationConfig.explorerTxBase}${forwardTxHash}`} target="_blank" rel="noreferrer">{forwardTxHash}</a>
-                </p>
-              )}
-            </div>
-          )}
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleCloseWithdraw}
-              disabled={sending}
-              className="flex-1 rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 text-sm font-semibold text-gray-100 transition hover:bg-white/10 disabled:opacity-50"
-            >
-              Close
-            </button>
-            <button
-              type="submit"
-              disabled={
-                sending ||
-                isProcessingWithdrawal ||
-                !activeWalletAddress ||
-                !parsedInputAmount ||
-                !destinationConfig ||
-                !destinationAddress.trim() ||
-                quoteLoading ||
-                !quote ||
-                quoteExpired ||
-                insufficientBalance ||
-                config.errors.length > 0
-              }
-              className="flex-1 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 px-3 py-2.5 text-sm font-semibold text-white transition hover:from-indigo-400 hover:to-violet-400 disabled:opacity-50"
-            >
-              {sending ? 'Submitting...' : isProcessingWithdrawal ? 'Processing...' : 'Confirm withdraw'}
-            </button>
-          </div>
-
-          {withdrawalId && forwardTxHash && (
-            <button
-              type="button"
-              onClick={resetFlow}
-              className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 text-sm text-gray-100 transition hover:bg-white/10"
-            >
-              Start new withdrawal
-            </button>
-          )}
-        </form>
-      )}
+      ) : null}
     </aside>
   );
 }

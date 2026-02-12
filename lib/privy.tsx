@@ -25,7 +25,7 @@ export function PrivyProviderWrapper({ children }: { children: React.ReactNode }
     <PrivyProvider
       appId={PRIVY_APP_ID}
       config={{
-        loginMethods: ['email', 'google'],
+        loginMethods: ['email'],
         appearance: {
           theme: 'dark',
           accentColor: '#7C3AED',
