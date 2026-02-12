@@ -84,6 +84,17 @@ function timeRemainingLabel(expiresAtMs?: number | null): string {
   return `${minutes}m`;
 }
 
+function getAmountFontSize(displayValue: string): string {
+  const length = displayValue.replace('.', '').length || 1;
+  const maxSize = 3.2;
+  const bucketSize = 6;
+  const bucket = Math.floor((length - 1) / bucketSize);
+  const size = maxSize / (1 + bucket * 0.28);
+  return `${size}rem`;
+}
+
+const MAX_USDC_MINOR = 1_000_000_000_000_000 - 1; // 1 quadrillion - 1 (minor units)
+
 function UsdcIcon({ size = 16 }: { size?: number }) {
   return (
     <svg
@@ -279,10 +290,18 @@ export function WalletPanel() {
     const [wholeRaw = '', fractionRaw = ''] = cleaned.split('.');
     const whole = wholeRaw.replace(/^0+(?=\d)/, '');
     const fraction = fractionRaw.slice(0, 6);
-    if (cleaned.includes('.')) {
-      return `${whole || '0'}.${fraction}`;
+    const normalized = cleaned.includes('.')
+      ? `${whole || '0'}.${fraction}`
+      : whole || '0';
+    try {
+      const minor = parseUnits(normalized, 6);
+      if (minor > BigInt(MAX_USDC_MINOR)) {
+        return '999999999999999.999999';
+      }
+    } catch {
+      return normalized;
     }
-    return whole || '0';
+    return normalized;
   }, []);
   const handleAmountChange = useCallback(
     (value: string) => {
@@ -329,22 +348,56 @@ export function WalletPanel() {
   const quoteExpiresAtMs = useMemo(() => normalizeTimestamp(quote?.expires_at), [quote?.expires_at]);
   const quoteExpired = quoteExpiresAtMs ? quoteExpiresAtMs <= Date.now() : false;
   const quoteTimeRemaining = timeRemainingLabel(quoteExpiresAtMs);
+  const selectedFeeEstimateMinor = useMemo(() => {
+    if (destination === 'base') return 0n;
+    const estimate = networkFeeEstimates[destination];
+    if (typeof estimate === 'number' && Number.isFinite(estimate) && estimate > 0) {
+      return BigInt(Math.round(estimate));
+    }
+    return feeEstimateMinor > 0n ? feeEstimateMinor : 0n;
+  }, [destination, feeEstimateMinor, networkFeeEstimates]);
+  const feeBasisMinor = useMemo(() => {
+    if (quote) return quote.max_fee_usdc_minor;
+    const estimate = toNumberSafe(selectedFeeEstimateMinor);
+    return estimate > 0 ? estimate : 0;
+  }, [quote, selectedFeeEstimateMinor]);
   const derivedPayMinor = useMemo(() => {
     if (!parsedInputAmount) return null;
     if (amountMode === 'pay') return toNumberSafe(parsedInputAmount);
-    if (!quote) return null;
-    return quote.total_burn_usdc_minor;
-  }, [amountMode, parsedInputAmount, quote]);
+    if (quote) return quote.total_burn_usdc_minor;
+    return Math.max(0, toNumberSafe(parsedInputAmount) + feeBasisMinor);
+  }, [amountMode, feeBasisMinor, parsedInputAmount, quote]);
   const derivedReceiveMinor = useMemo(() => {
     if (!parsedInputAmount) return null;
     if (amountMode === 'receive') {
-      if (!quote) return null;
-      return quote.transfer_amount_usdc_minor;
+      if (quote) return quote.transfer_amount_usdc_minor;
+      return toNumberSafe(parsedInputAmount);
     }
-    if (!quote) return null;
     const payMinor = toNumberSafe(parsedInputAmount);
-    return Math.max(0, payMinor - quote.max_fee_usdc_minor);
-  }, [amountMode, parsedInputAmount, quote]);
+    return Math.max(0, payMinor - feeBasisMinor);
+  }, [amountMode, feeBasisMinor, parsedInputAmount, quote]);
+  const minReceiveMinor = 1_000_000;
+  const minPayMinor = feeBasisMinor + minReceiveMinor;
+  const belowMinReceive =
+    parsedInputAmount !== null &&
+    parsedInputAmount > 0n &&
+    derivedReceiveMinor !== null &&
+    derivedReceiveMinor < minReceiveMinor;
+  const formatMinorForInput = useCallback((minor: number | null) => {
+    if (minor === null || !Number.isFinite(minor)) return '';
+    const normalized = Math.max(0, Math.floor(minor));
+    return formatUnits(BigInt(normalized), 6);
+  }, []);
+  const handleSelectPay = useCallback(() => {
+    const nextValue = formatMinorForInput(derivedPayMinor);
+    handleAmountChange(nextValue);
+    setAmountMode('pay');
+  }, [derivedPayMinor, formatMinorForInput, handleAmountChange]);
+  const handleSelectReceive = useCallback(() => {
+    const nextValue = formatMinorForInput(derivedReceiveMinor);
+    handleAmountChange(nextValue);
+    setAmountMode('receive');
+  }, [derivedReceiveMinor, formatMinorForInput, handleAmountChange]);
   const isProcessingWithdrawal =
     !!withdrawalId &&
     withdrawalStatus !== 'MINTED' &&
@@ -665,19 +718,22 @@ export function WalletPanel() {
     return BigInt(quote.total_burn_usdc_minor);
   }, [amountMode, parsedInputAmount, quote]);
 
-  const selectedFeeEstimateMinor = useMemo(() => {
-    if (destination === 'base') return 0n;
-    const estimate = networkFeeEstimates[destination];
-    if (typeof estimate === 'number' && Number.isFinite(estimate) && estimate > 0) {
-      return BigInt(Math.round(estimate));
-    }
-    return feeEstimateMinor > 0n ? feeEstimateMinor : 0n;
-  }, [destination, feeEstimateMinor, networkFeeEstimates]);
-
   const insufficientBalance =
     balanceMinor !== null &&
     requiredPayMinor !== null &&
     balanceMinor < requiredPayMinor;
+
+  useEffect(() => {
+    if (amountMode !== 'receive') return;
+    if (!quote || balanceMinor === null) return;
+    if (!parsedInputAmount) return;
+    const maxFeeMinor = BigInt(quote.max_fee_usdc_minor ?? 0);
+    const maxReceivable = balanceMinor > maxFeeMinor ? balanceMinor - maxFeeMinor : 0n;
+    if (parsedInputAmount > maxReceivable) {
+      const nextValue = maxReceivable === 0n ? '0.00' : formatUnits(maxReceivable, 6);
+      handleAmountChange(nextValue);
+    }
+  }, [amountMode, balanceMinor, handleAmountChange, parsedInputAmount, quote]);
 
   const handleCopyAddress = async () => {
     if (!activeWalletAddress) return;
@@ -692,15 +748,19 @@ export function WalletPanel() {
 
   const handleOpenWithdraw = () => {
     setFormError(null);
+    setAmountInput('');
+    setQuote(null);
+    setQuoteError(null);
+    setQuoteLoading(false);
+    setFeeEstimateMinor(0n);
     setWithdrawOpen(true);
     setStep(1);
   };
 
   const handleCloseWithdraw = () => {
     if (sending) return;
-    setFormError(null);
+    resetFlow();
     setWithdrawOpen(false);
-    setStep(1);
   };
 
   const resetFlow = () => {
@@ -710,6 +770,11 @@ export function WalletPanel() {
     setForwardTxHash(null);
     setFormError(null);
     setSending(false);
+    setAmountInput('');
+    setQuote(null);
+    setQuoteError(null);
+    setQuoteLoading(false);
+    setFeeEstimateMinor(0n);
     setStep(1);
   };
 
@@ -889,7 +954,9 @@ export function WalletPanel() {
 
   if (withdrawOpen) {
     const headerTitle = step === 4 ? 'Review' : 'Send';
-    const amountDisplay = amountInput || '0';
+    const amountDisplay = amountInput || '0.00';
+    const amountDisplayWidth = `${Math.max(amountDisplay.length, 1)}ch`;
+    const amountFontSize = getAmountFontSize(amountDisplay);
     const amountMuted =
       !amountInput || amountInput === '0' || amountInput === '0.' || amountInput === '0.0';
     return (
@@ -998,11 +1065,11 @@ export function WalletPanel() {
 
             {step === 2 && (
               <div className="flex flex-1 flex-col justify-between pb-6 pt-8 animate-slide-in">
-                <div className="space-y-5 text-center">
+                <div className="flex flex-1 flex-col items-center justify-center space-y-5 text-center">
                   <div className="flex items-center justify-center gap-2 text-[11px] text-gray-400">
                     <button
                       type="button"
-                      onClick={() => setAmountMode('pay')}
+                      onClick={handleSelectPay}
                       className={`rounded-full border px-3 py-1 transition ${
                         amountMode === 'pay'
                           ? 'border-white/40 bg-white/10 text-white'
@@ -1013,7 +1080,7 @@ export function WalletPanel() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setAmountMode('receive')}
+                      onClick={handleSelectReceive}
                       className={`rounded-full border px-3 py-1 transition ${
                         amountMode === 'receive'
                           ? 'border-white/40 bg-white/10 text-white'
@@ -1024,34 +1091,53 @@ export function WalletPanel() {
                     </button>
                   </div>
 
-                  <div className="flex items-baseline justify-center gap-2">
-                    <input
-                      type="text"
-                      inputMode="none"
-                      readOnly
-                      value={amountDisplay}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Backspace') {
-                          event.preventDefault();
-                          handleAmountBackspace();
-                          return;
-                        }
-                        if (event.key === '.') {
-                          event.preventDefault();
-                          appendAmountChar('.');
-                          return;
-                        }
-                        if (/^\\d$/.test(event.key)) {
-                          event.preventDefault();
-                          appendAmountChar(event.key);
-                        }
-                      }}
-                      aria-label="USDC amount"
-                      className={`w-56 bg-transparent text-center text-5xl font-semibold tracking-tight focus:outline-none ${
-                        amountMuted ? 'text-gray-500' : 'text-white'
-                      }`}
-                    />
-                    <span className="text-lg text-gray-500">USDC</span>
+                  <div className="flex h-[3.6rem] items-center justify-center">
+                    <div className="inline-flex items-baseline">
+                      <input
+                        type="text"
+                        inputMode="none"
+                        readOnly
+                        value={amountDisplay}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Backspace') {
+                            event.preventDefault();
+                            handleAmountBackspace();
+                            return;
+                          }
+                          if (event.key === '.') {
+                            event.preventDefault();
+                            appendAmountChar('.');
+                            return;
+                          }
+                          if (/^\\d$/.test(event.key)) {
+                            event.preventDefault();
+                            appendAmountChar(event.key);
+                          }
+                        }}
+                        aria-label="USDC amount"
+                        style={{
+                          width: amountDisplayWidth,
+                          marginRight: '0.2em',
+                          fontSize: amountFontSize,
+                          lineHeight: '1.05',
+                        }}
+                        className={`bg-transparent text-center font-semibold tracking-tight focus:outline-none ${
+                          insufficientBalance
+                            ? 'text-[#ff6b7a]'
+                            : amountInput.trim()
+                              ? 'text-white'
+                              : 'text-gray-500'
+                        }`}
+                      />
+                      <span
+                        style={{ fontSize: amountFontSize, lineHeight: '1.05' }}
+                        className={`font-semibold ${
+                          insufficientBalance ? 'text-[#ff6b7a]' : 'text-gray-500'
+                        }`}
+                      >
+                        USDC
+                      </span>
+                    </div>
                   </div>
                   <p className="text-xs text-gray-500">
                     {formattedBalance ?? '0.00'} USDC available
@@ -1088,10 +1174,14 @@ export function WalletPanel() {
                         type="button"
                         onClick={() => {
                           if (!balanceMinor) return;
+                          const feeBasis =
+                            amountMode === 'receive' && quote
+                              ? BigInt(quote.max_fee_usdc_minor)
+                              : selectedFeeEstimateMinor;
                           const available =
                             amountMode === 'receive'
-                              ? balanceMinor > selectedFeeEstimateMinor
-                                ? balanceMinor - selectedFeeEstimateMinor
+                              ? balanceMinor > feeBasis
+                                ? balanceMinor - feeBasis
                                 : 0n
                               : balanceMinor;
                           const value = (available * BigInt(pct)) / 100n;
@@ -1106,10 +1196,14 @@ export function WalletPanel() {
                       type="button"
                       onClick={() => {
                         if (!balanceMinor) return;
+                        const feeBasis =
+                          amountMode === 'receive' && quote
+                            ? BigInt(quote.max_fee_usdc_minor)
+                            : selectedFeeEstimateMinor;
                         const available =
                           amountMode === 'receive'
-                            ? balanceMinor > selectedFeeEstimateMinor
-                              ? balanceMinor - selectedFeeEstimateMinor
+                            ? balanceMinor > feeBasis
+                              ? balanceMinor - feeBasis
                               : 0n
                             : balanceMinor;
                         handleAmountChange(formatUnits(available, 6));
@@ -1124,11 +1218,17 @@ export function WalletPanel() {
                     <div className="w-full rounded-2xl bg-[#ff6b7a] py-3 text-center text-sm font-semibold text-black">
                       Insufficient funds
                     </div>
+                  ) : belowMinReceive ? (
+                    <div className="w-full rounded-2xl bg-[#ff6b7a] py-3 text-center text-sm font-semibold text-black">
+                      {amountMode === 'pay' && minPayMinor !== null
+                        ? `Minimum amount is ${formatUsdc(minPayMinor)} USDC`
+                        : 'Minimum amount is 1.00 USDC'}
+                    </div>
                   ) : (
                     <button
                       type="button"
                       onClick={() => setStep(3)}
-                      disabled={!parsedInputAmount || parsedInputAmount <= 0n}
+                      disabled={!parsedInputAmount || parsedInputAmount <= 0n || belowMinReceive}
                       className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
                     >
                       Continue
