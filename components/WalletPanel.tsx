@@ -243,6 +243,10 @@ export function WalletPanel() {
   const [quote, setQuote] = useState<WithdrawalQuoteResponse | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteRefreshNonce, setQuoteRefreshNonce] = useState(0);
+  const [quoteTick, setQuoteTick] = useState(0);
+  const [lockedQuote, setLockedQuote] = useState<WithdrawalQuoteResponse | null>(null);
+  const [lockedAmountInput, setLockedAmountInput] = useState<string | null>(null);
+  const [lockedAmountMode, setLockedAmountMode] = useState<AmountMode | null>(null);
   const [networkFeeEstimates, setNetworkFeeEstimates] = useState<
     Partial<Record<DestinationChain, number>>
   >({});
@@ -337,6 +341,16 @@ export function WalletPanel() {
       return null;
     }
   }, [amountInput]);
+  const effectiveAmountInput = lockedAmountInput ?? amountInput;
+  const effectiveParsedInputAmount = useMemo(() => {
+    const trimmed = effectiveAmountInput.trim();
+    if (!trimmed) return null;
+    try {
+      return parseUnits(trimmed, 6);
+    } catch {
+      return null;
+    }
+  }, [effectiveAmountInput]);
 
   const quoteRequestAmount = useMemo(() => {
     if (!parsedInputAmount) return null;
@@ -347,7 +361,16 @@ export function WalletPanel() {
 
   const quoteExpiresAtMs = useMemo(() => normalizeTimestamp(quote?.expires_at), [quote?.expires_at]);
   const quoteExpired = quoteExpiresAtMs ? quoteExpiresAtMs <= Date.now() : false;
-  const quoteTimeRemaining = timeRemainingLabel(quoteExpiresAtMs);
+  const quoteTimeRemaining = useMemo(
+    () => timeRemainingLabel(quoteExpiresAtMs),
+    [quoteExpiresAtMs, quoteTick]
+  );
+  const isProcessingWithdrawal =
+    !!withdrawalId &&
+    withdrawalStatus !== 'MINTED' &&
+    withdrawalStatus !== 'FAILED' &&
+    withdrawalStatus !== 'EXPIRED';
+  const isQuoteLocked = lockedQuote !== null || isProcessingWithdrawal || sending;
   const selectedFeeEstimateMinor = useMemo(() => {
     if (destination === 'base') return 0n;
     const estimate = networkFeeEstimates[destination];
@@ -362,25 +385,27 @@ export function WalletPanel() {
     return estimate > 0 ? estimate : 0;
   }, [quote, selectedFeeEstimateMinor]);
   const derivedPayMinor = useMemo(() => {
-    if (!parsedInputAmount) return null;
-    if (amountMode === 'pay') return toNumberSafe(parsedInputAmount);
+    if (!effectiveParsedInputAmount) return null;
+    const mode = lockedAmountMode ?? amountMode;
+    if (mode === 'pay') return toNumberSafe(effectiveParsedInputAmount);
     if (quote) return quote.total_burn_usdc_minor;
-    return Math.max(0, toNumberSafe(parsedInputAmount) + feeBasisMinor);
-  }, [amountMode, feeBasisMinor, parsedInputAmount, quote]);
+    return Math.max(0, toNumberSafe(effectiveParsedInputAmount) + feeBasisMinor);
+  }, [amountMode, effectiveParsedInputAmount, feeBasisMinor, lockedAmountMode, quote]);
   const derivedReceiveMinor = useMemo(() => {
-    if (!parsedInputAmount) return null;
-    if (amountMode === 'receive') {
+    if (!effectiveParsedInputAmount) return null;
+    const mode = lockedAmountMode ?? amountMode;
+    if (mode === 'receive') {
       if (quote) return quote.transfer_amount_usdc_minor;
-      return toNumberSafe(parsedInputAmount);
+      return toNumberSafe(effectiveParsedInputAmount);
     }
-    const payMinor = toNumberSafe(parsedInputAmount);
+    const payMinor = toNumberSafe(effectiveParsedInputAmount);
     return Math.max(0, payMinor - feeBasisMinor);
-  }, [amountMode, feeBasisMinor, parsedInputAmount, quote]);
+  }, [amountMode, effectiveParsedInputAmount, feeBasisMinor, lockedAmountMode, quote]);
   const minReceiveMinor = 1_000_000;
   const minPayMinor = feeBasisMinor + minReceiveMinor;
   const belowMinReceive =
-    parsedInputAmount !== null &&
-    parsedInputAmount > 0n &&
+    effectiveParsedInputAmount !== null &&
+    effectiveParsedInputAmount > 0n &&
     derivedReceiveMinor !== null &&
     derivedReceiveMinor < minReceiveMinor;
   const formatMinorForInput = useCallback((minor: number | null) => {
@@ -398,15 +423,9 @@ export function WalletPanel() {
     handleAmountChange(nextValue);
     setAmountMode('receive');
   }, [derivedReceiveMinor, formatMinorForInput, handleAmountChange]);
-  const isProcessingWithdrawal =
-    !!withdrawalId &&
-    withdrawalStatus !== 'MINTED' &&
-    withdrawalStatus !== 'FAILED' &&
-    withdrawalStatus !== 'EXPIRED';
-
   useEffect(() => {
     if (!quote || !quoteExpiresAtMs || !activeWalletAddress) return;
-    if (sending) return;
+    if (sending || isQuoteLocked) return;
 
     const delay = quoteExpiresAtMs - Date.now() + 250;
     if (delay <= 0) {
@@ -428,11 +447,21 @@ export function WalletPanel() {
     quoteExpiresAtMs,
     activeWalletAddress,
     sending,
+    isQuoteLocked,
     quoteLoading,
     destination,
     amountMode,
     parsedInputAmount,
   ]);
+
+  useEffect(() => {
+    if (!quoteExpiresAtMs || isQuoteLocked) return;
+    setQuoteTick(Date.now());
+    const timerId = window.setInterval(() => {
+      setQuoteTick(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timerId);
+  }, [quoteExpiresAtMs, isQuoteLocked]);
 
   const publicClient = useMemo(() => {
     return createPublicClient({
@@ -623,6 +652,10 @@ export function WalletPanel() {
       return;
     }
 
+    if (isQuoteLocked) {
+      return;
+    }
+
     if (!quoteRequestAmount || !destination || !activeWalletAddress) {
       setQuote(null);
       setQuoteError(null);
@@ -672,6 +705,7 @@ export function WalletPanel() {
     parsedInputAmount,
     quoteRequestAmount,
     quoteRefreshNonce,
+    isQuoteLocked,
   ]);
 
   useEffect(() => {
@@ -724,6 +758,7 @@ export function WalletPanel() {
     balanceMinor < requiredPayMinor;
 
   useEffect(() => {
+    if (isQuoteLocked) return;
     if (amountMode !== 'receive') return;
     if (!quote || balanceMinor === null) return;
     if (!parsedInputAmount) return;
@@ -733,7 +768,7 @@ export function WalletPanel() {
       const nextValue = maxReceivable === 0n ? '0.00' : formatUnits(maxReceivable, 6);
       handleAmountChange(nextValue);
     }
-  }, [amountMode, balanceMinor, handleAmountChange, parsedInputAmount, quote]);
+  }, [amountMode, balanceMinor, handleAmountChange, isQuoteLocked, parsedInputAmount, quote]);
 
   const handleCopyAddress = async () => {
     if (!activeWalletAddress) return;
@@ -753,6 +788,9 @@ export function WalletPanel() {
     setQuoteError(null);
     setQuoteLoading(false);
     setFeeEstimateMinor(0n);
+    setLockedQuote(null);
+    setLockedAmountInput(null);
+    setLockedAmountMode(null);
     setWithdrawOpen(true);
     setStep(1);
   };
@@ -775,6 +813,9 @@ export function WalletPanel() {
     setQuoteError(null);
     setQuoteLoading(false);
     setFeeEstimateMinor(0n);
+    setLockedQuote(null);
+    setLockedAmountInput(null);
+    setLockedAmountMode(null);
     setStep(1);
   };
 
@@ -816,6 +857,15 @@ export function WalletPanel() {
       return;
     }
 
+    if (belowMinReceive) {
+      setFormError(
+        amountMode === 'pay'
+          ? `Minimum amount is ${formatUsdc(minPayMinor)} USDC`
+          : 'Minimum amount is 1.00 USDC'
+      );
+      return;
+    }
+
     if (!quote || quoteExpired) {
       setFormError('Quote expired. Please refresh.');
       return;
@@ -830,6 +880,9 @@ export function WalletPanel() {
       }
     }
 
+    setLockedQuote(quote);
+    setLockedAmountInput(amountInput);
+    setLockedAmountMode(amountMode);
     setSending(true);
     try {
       if (destination === 'base') {
@@ -954,11 +1007,13 @@ export function WalletPanel() {
 
   if (withdrawOpen) {
     const headerTitle = step === 4 ? 'Review' : 'Send';
-    const amountDisplay = amountInput || '0.00';
+    const amountDisplay = effectiveAmountInput || '0.00';
     const amountDisplayWidth = `${Math.max(amountDisplay.length, 1)}ch`;
     const amountFontSize = getAmountFontSize(amountDisplay);
     const amountMuted =
       !amountInput || amountInput === '0' || amountInput === '0.' || amountInput === '0.0';
+    const displayQuote = lockedQuote ?? quote;
+    const displayMode = lockedAmountMode ?? amountMode;
     return (
       <div className="fixed inset-0 z-50 bg-[#0a0a0a]">
         <div className="relative mx-auto flex h-full w-full max-w-md flex-col px-4 pt-5 pb-8">
@@ -1336,14 +1391,20 @@ export function WalletPanel() {
                   <div className="rounded-2xl border border-white/10 bg-[#111111] p-4 space-y-3">
                     <div className="text-center">
                       <p className="text-2xl font-semibold text-white">
-                        {amountMode === 'pay'
-                          ? formatUsdc(toNumberSafe(parsedInputAmount ?? 0n))
-                          : quote
-                            ? formatUsdc(quote.transfer_amount_usdc_minor)
-                            : amountDisplay}{' '}
+                        {(lockedAmountMode ?? amountMode) === 'pay'
+                          ? derivedPayMinor !== null
+                            ? formatUsdc(derivedPayMinor)
+                            : '0.00'
+                          : lockedQuote
+                            ? formatUsdc(lockedQuote.transfer_amount_usdc_minor)
+                            : derivedReceiveMinor !== null
+                              ? formatUsdc(derivedReceiveMinor)
+                              : '0.00'}{' '}
                         USDC
                       </p>
-                      <p className="text-xs text-gray-500">{quoteTimeRemaining}</p>
+                      <p className="text-xs text-gray-500">
+                        {isQuoteLocked ? 'Locked' : quoteTimeRemaining}
+                      </p>
                     </div>
                     <div className="space-y-2 text-sm text-gray-300">
                       <div className="flex items-center justify-between">
@@ -1358,40 +1419,38 @@ export function WalletPanel() {
                       </div>
                     </div>
                     <div className="border-t border-white/10 pt-3 space-y-1.5 text-xs text-gray-300">
-                      {quoteLoading ? (
+                      {quoteLoading && !displayQuote ? (
                         <p>Fetching quote...</p>
                       ) : quoteError ? (
                         <p className="text-red-400">{quoteError}</p>
-                      ) : quote ? (
+                      ) : displayQuote ? (
                         <>
                           <p>
                             You pay:{' '}
                             <span className="text-white">
-                              {amountMode === 'pay'
-                                ? formatUsdc(toNumberSafe(parsedInputAmount ?? 0n))
-                                : formatUsdc(quote.total_burn_usdc_minor)}{' '}
+                              {displayMode === 'pay'
+                                ? derivedPayMinor !== null
+                                  ? formatUsdc(derivedPayMinor)
+                                  : '0.00'
+                                : formatUsdc(displayQuote.total_burn_usdc_minor)}{' '}
                               USDC
                             </span>
                           </p>
                           <p>
                             You receive:{' '}
                             <span className="text-white">
-                              {amountMode === 'receive'
-                                ? formatUsdc(quote.transfer_amount_usdc_minor)
-                                : formatUsdc(
-                                    Math.max(
-                                      0,
-                                      toNumberSafe(parsedInputAmount ?? 0n) -
-                                        quote.max_fee_usdc_minor
-                                    )
-                                  )}{' '}
+                              {displayMode === 'receive'
+                                ? formatUsdc(displayQuote.transfer_amount_usdc_minor)
+                                : derivedReceiveMinor !== null
+                                  ? formatUsdc(derivedReceiveMinor)
+                                  : '0.00'}{' '}
                               USDC
                             </span>
                           </p>
                           <p>
                             Fees:{' '}
                             <span className="text-white">
-                              {formatUsdc(quote.max_fee_usdc_minor)} USDC
+                              {formatUsdc(displayQuote.max_fee_usdc_minor)} USDC
                             </span>
                           </p>
                         </>
@@ -1414,12 +1473,19 @@ export function WalletPanel() {
                     </div>
                   )}
 
-                  {formError && <p className="text-xs text-red-400">{formError}</p>}
-                  {insufficientBalance && (
-                    <p className="text-xs text-yellow-300">
-                      Insufficient USDC balance for this amount.
-                    </p>
-                  )}
+                {formError && <p className="text-xs text-red-400">{formError}</p>}
+                {insufficientBalance && (
+                  <p className="text-xs text-yellow-300">
+                    Insufficient USDC balance for this amount.
+                  </p>
+                )}
+                {belowMinReceive && (
+                  <p className="text-xs text-yellow-300">
+                    {amountMode === 'pay'
+                      ? `Minimum amount is ${formatUsdc(minPayMinor)} USDC`
+                      : 'Minimum amount is 1.00 USDC'}
+                  </p>
+                )}
 
                   {(withdrawalId || burnTxHash) && (
                     <div className="rounded-2xl border border-white/10 bg-[#111111] p-3 text-xs text-gray-300 space-y-1">
@@ -1480,6 +1546,7 @@ export function WalletPanel() {
                         !quote ||
                         quoteExpired ||
                         insufficientBalance ||
+                        belowMinReceive ||
                         config.errors.length > 0
                       }
                       className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
