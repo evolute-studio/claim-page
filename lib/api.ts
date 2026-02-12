@@ -26,7 +26,7 @@ function getApiBaseOrThrow(): string {
   return value.replace(/\/+$/, '');
 }
 
-function getAuthHeaders(privyIdentityToken: string): HeadersInit {
+function getAuthHeaders(privyIdentityToken: string): Record<string, string> {
   return {
     Authorization: `Bearer ${privyIdentityToken}`,
   };
@@ -312,8 +312,8 @@ export async function getMyPayouts(
 
   const payoutsRaw = Array.isArray(data.payouts) ? data.payouts : [];
   const payouts = payoutsRaw
-    .map((item) => normalizePayout(item))
-    .filter((item): item is PayoutPreview => item !== null);
+    .map((item: unknown) => normalizePayout(item))
+    .filter((item: PayoutPreview | null): item is PayoutPreview => item !== null);
 
   return {
     payouts,
@@ -362,7 +362,7 @@ export async function createWithdrawal(
   idempotencyKey?: string
 ): Promise<CreateWithdrawalResponse> {
   const apiBase = getApiBaseOrThrow();
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...getAuthHeaders(privyIdentityToken),
   };
@@ -390,7 +390,7 @@ export async function submitBurnTx(
   idempotencyKey?: string
 ): Promise<BurnSubmittedResponse> {
   const apiBase = getApiBaseOrThrow();
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...getAuthHeaders(privyIdentityToken),
   };
@@ -459,8 +459,12 @@ export async function getMyWithdrawals(
         : [];
 
   const withdrawals = rawList
-    .map((item) => (item && typeof item === 'object' ? normalizeWithdrawal(item as Record<string, unknown>) : null))
-    .filter((item): item is WithdrawalListItem => item !== null);
+    .map((item: unknown) =>
+      item && typeof item === 'object'
+        ? normalizeWithdrawal(item as Record<string, unknown>)
+        : null
+    )
+    .filter((item: WithdrawalListItem | null): item is WithdrawalListItem => item !== null);
 
   return {
     withdrawals,

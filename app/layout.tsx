@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   description: 'Wallet-first dashboard for USDC payouts and claims',
 };
 
+export const dynamic = 'force-dynamic';
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
