@@ -232,6 +232,10 @@ export function WalletPanel() {
   const [quote, setQuote] = useState<WithdrawalQuoteResponse | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteRefreshNonce, setQuoteRefreshNonce] = useState(0);
+  const [networkFeeEstimates, setNetworkFeeEstimates] = useState<
+    Partial<Record<DestinationChain, number>>
+  >({});
+  const [networkFeeLoading, setNetworkFeeLoading] = useState(false);
   const [balance, setBalance] = useState<string | null>(null);
   const [balanceMinor, setBalanceMinor] = useState<bigint | null>(null);
   const [balanceError, setBalanceError] = useState<string | null>(null);
@@ -245,6 +249,7 @@ export function WalletPanel() {
   const [forwardTxHash, setForwardTxHash] = useState<string | null>(null);
   const [feeEstimateMinor, setFeeEstimateMinor] = useState<bigint>(0n);
   const quoteRequestId = useRef(0);
+  const networkFeeRequestId = useRef(0);
 
   const activeWalletAddress = wallets[0]?.address ?? null;
   const destinationChains = useMemo(
@@ -252,6 +257,22 @@ export function WalletPanel() {
     [config.sourceChain]
   );
   const destinationConfig = getDestinationConfig(destination, config.sourceChain);
+  const networkAvailability = useMemo(() => {
+    const availability: Partial<Record<DestinationChain, boolean>> = {};
+    destinationChains.forEach((option) => {
+      if (option.key === 'base') {
+        availability[option.key] = true;
+        return;
+      }
+      const feeEstimate = networkFeeEstimates[option.key];
+      if (feeEstimate === undefined || balanceMinor === null) {
+        availability[option.key] = true;
+        return;
+      }
+      availability[option.key] = balanceMinor >= BigInt(feeEstimate);
+    });
+    return availability;
+  }, [balanceMinor, destinationChains, networkFeeEstimates]);
   const clampAmountInput = useCallback((raw: string) => {
     const cleaned = raw.replace(/[^0-9.]/g, '');
     if (!cleaned) return '';
@@ -308,6 +329,22 @@ export function WalletPanel() {
   const quoteExpiresAtMs = useMemo(() => normalizeTimestamp(quote?.expires_at), [quote?.expires_at]);
   const quoteExpired = quoteExpiresAtMs ? quoteExpiresAtMs <= Date.now() : false;
   const quoteTimeRemaining = timeRemainingLabel(quoteExpiresAtMs);
+  const derivedPayMinor = useMemo(() => {
+    if (!parsedInputAmount) return null;
+    if (amountMode === 'pay') return toNumberSafe(parsedInputAmount);
+    if (!quote) return null;
+    return quote.total_burn_usdc_minor;
+  }, [amountMode, parsedInputAmount, quote]);
+  const derivedReceiveMinor = useMemo(() => {
+    if (!parsedInputAmount) return null;
+    if (amountMode === 'receive') {
+      if (!quote) return null;
+      return quote.transfer_amount_usdc_minor;
+    }
+    if (!quote) return null;
+    const payMinor = toNumberSafe(parsedInputAmount);
+    return Math.max(0, payMinor - quote.max_fee_usdc_minor);
+  }, [amountMode, parsedInputAmount, quote]);
   const isProcessingWithdrawal =
     !!withdrawalId &&
     withdrawalStatus !== 'MINTED' &&
@@ -437,8 +474,69 @@ export function WalletPanel() {
   }, [destination, destinationChains]);
 
   useEffect(() => {
+    if (!destinationChains.length) return;
+    if (networkAvailability[destination] !== false) return;
+    const fallback = destinationChains.find(
+      (option) => networkAvailability[option.key] !== false
+    );
+    if (fallback) {
+      setDestination(fallback.key);
+    }
+  }, [destination, destinationChains, networkAvailability]);
+
+  useEffect(() => {
     setFormError(null);
   }, [step]);
+
+  useEffect(() => {
+    if (!withdrawOpen || step !== 1) return;
+    const hasAllEstimates = destinationChains.every(
+      (option) => networkFeeEstimates[option.key] !== undefined
+    );
+    if (hasAllEstimates) return;
+
+    let cancelled = false;
+    const requestId = ++networkFeeRequestId.current;
+
+    const loadEstimates = async () => {
+      setNetworkFeeLoading(true);
+      try {
+        const token = await getAuthToken();
+        const results = await Promise.all(
+          destinationChains.map(async (option) => {
+            if (option.key === 'base') {
+              return [option.key, 0] as const;
+            }
+            const response = await getWithdrawalQuote(token, {
+              dest_chain: option.key,
+              transfer_amount_usdc_minor: 1_000_000,
+            });
+            return [option.key, response.max_fee_usdc_minor] as const;
+          })
+        );
+        if (cancelled || networkFeeRequestId.current !== requestId) return;
+        const estimateMap: Partial<Record<DestinationChain, number>> = {};
+        results.forEach(([key, fee]) => {
+          estimateMap[key] = fee;
+        });
+        setNetworkFeeEstimates(estimateMap);
+      } catch {
+        if (!cancelled && networkFeeRequestId.current === requestId) {
+          setNetworkFeeEstimates({});
+        }
+      } finally {
+        if (!cancelled && networkFeeRequestId.current === requestId) {
+          setNetworkFeeLoading(false);
+        }
+      }
+    };
+
+    loadEstimates();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [destinationChains, getAuthToken, networkFeeEstimates, step, withdrawOpen]);
 
   useEffect(() => {
     if (destination === 'base') {
@@ -566,6 +664,15 @@ export function WalletPanel() {
     if (amountMode === 'pay') return parsedInputAmount ?? null;
     return BigInt(quote.total_burn_usdc_minor);
   }, [amountMode, parsedInputAmount, quote]);
+
+  const selectedFeeEstimateMinor = useMemo(() => {
+    if (destination === 'base') return 0n;
+    const estimate = networkFeeEstimates[destination];
+    if (typeof estimate === 'number' && Number.isFinite(estimate) && estimate > 0) {
+      return BigInt(Math.round(estimate));
+    }
+    return feeEstimateMinor > 0n ? feeEstimateMinor : 0n;
+  }, [destination, feeEstimateMinor, networkFeeEstimates]);
 
   const insufficientBalance =
     balanceMinor !== null &&
@@ -823,6 +930,73 @@ export function WalletPanel() {
             </div>
 
             {step === 1 && (
+              <div className="flex flex-1 flex-col justify-between pb-6 pt-6 animate-slide-in">
+                <div className="space-y-3">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-gray-500">
+                    Choose network
+                  </p>
+                  <div className="space-y-2">
+                    {destinationChains.map((option) => {
+                      const feeEstimate = networkFeeEstimates[option.key];
+                      const feeAffordable = networkAvailability[option.key] !== false;
+                      const feeLabel =
+                        option.key === 'base'
+                          ? 'No bridge fee'
+                          : !feeAffordable
+                            ? `Insufficient balance for network fee${
+                                feeEstimate !== undefined
+                                  ? ` (≈ ${formatUsdc(feeEstimate)} USDC)`
+                                  : ''
+                              }`
+                            : feeEstimate !== undefined
+                            ? `≈ ${formatUsdc(feeEstimate)} USDC fee`
+                            : networkFeeLoading
+                              ? 'Loading fee…'
+                              : 'Fee unavailable';
+
+                      return (
+                        <button
+                          key={option.key}
+                          type="button"
+                          onClick={() => setDestination(option.key)}
+                          disabled={!feeAffordable}
+                          className={`flex w-full items-start justify-between rounded-2xl border px-4 py-3 text-left text-sm transition ${
+                            destination === option.key
+                              ? 'border-white/40 bg-white/10 text-white'
+                              : 'border-white/10 bg-[#111111] text-gray-300 hover:bg-white/5'
+                          } ${!feeAffordable ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          <div className="flex flex-col gap-1">
+                            <span className="inline-flex items-center gap-2">
+                              <NetworkIcon chainName={option.label} size={18} />
+                              <span>{option.label}</span>
+                            </span>
+                            <span
+                              className={`text-[11px] ${
+                                !feeAffordable ? 'text-[#ff6b7a]' : 'text-gray-500'
+                              }`}
+                            >
+                              {feeLabel}
+                            </span>
+                          </div>
+                          {destination === option.key ? <span>✓</span> : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setStep(2)}
+                  disabled={!destinationConfig}
+                  className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
+                >
+                  Continue
+                </button>
+              </div>
+            )}
+
+            {step === 2 && (
               <div className="flex flex-1 flex-col justify-between pb-6 pt-8 animate-slide-in">
                 <div className="space-y-5 text-center">
                   <div className="flex items-center justify-center gap-2 text-[11px] text-gray-400">
@@ -882,15 +1056,31 @@ export function WalletPanel() {
                   <p className="text-xs text-gray-500">
                     {formattedBalance ?? '0.00'} USDC available
                   </p>
+                  <div className="space-y-1 text-xs">
+                    <div className="flex items-center justify-center gap-2">
+                      <span className="text-gray-500">You pay</span>
+                      <span className={amountMode === 'receive' ? 'text-white' : 'text-gray-400'}>
+                        {quoteLoading
+                          ? 'Calculating…'
+                          : derivedPayMinor !== null
+                            ? `${formatUsdc(derivedPayMinor)} USDC`
+                            : '—'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-center gap-2">
+                      <span className="text-gray-500">You receive</span>
+                      <span className={amountMode === 'pay' ? 'text-white' : 'text-gray-400'}>
+                        {quoteLoading
+                          ? 'Calculating…'
+                          : derivedReceiveMinor !== null
+                            ? `${formatUsdc(derivedReceiveMinor)} USDC`
+                            : '—'}
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="space-y-4">
-                  {insufficientBalance && (
-                    <div className="rounded-2xl bg-[#ff6b7a] px-4 py-2 text-center text-xs font-semibold text-black">
-                      Insufficient funds
-                    </div>
-                  )}
-
                   <div className="grid grid-cols-4 gap-2">
                     {[25, 50, 75].map((pct) => (
                       <button
@@ -898,9 +1088,14 @@ export function WalletPanel() {
                         type="button"
                         onClick={() => {
                           if (!balanceMinor) return;
-                          const value = (balanceMinor * BigInt(pct)) / 100n;
+                          const available =
+                            amountMode === 'receive'
+                              ? balanceMinor > selectedFeeEstimateMinor
+                                ? balanceMinor - selectedFeeEstimateMinor
+                                : 0n
+                              : balanceMinor;
+                          const value = (available * BigInt(pct)) / 100n;
                           handleAmountChange(formatUnits(value, 6));
-                          setAmountMode('pay');
                         }}
                         className="rounded-2xl border border-white/10 bg-white/5 py-2 text-sm text-white"
                       >
@@ -911,8 +1106,13 @@ export function WalletPanel() {
                       type="button"
                       onClick={() => {
                         if (!balanceMinor) return;
-                        handleAmountChange(formatUnits(balanceMinor, 6));
-                        setAmountMode('pay');
+                        const available =
+                          amountMode === 'receive'
+                            ? balanceMinor > selectedFeeEstimateMinor
+                              ? balanceMinor - selectedFeeEstimateMinor
+                              : 0n
+                            : balanceMinor;
+                        handleAmountChange(formatUnits(available, 6));
                       }}
                       className="rounded-2xl border border-white/10 bg-white/5 py-2 text-sm text-white"
                     >
@@ -920,14 +1120,20 @@ export function WalletPanel() {
                     </button>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setStep(2)}
-                    disabled={!parsedInputAmount || parsedInputAmount <= 0n}
-                    className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
-                  >
-                    Continue
-                  </button>
+                  {insufficientBalance ? (
+                    <div className="w-full rounded-2xl bg-[#ff6b7a] py-3 text-center text-sm font-semibold text-black">
+                      Insufficient funds
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setStep(3)}
+                      disabled={!parsedInputAmount || parsedInputAmount <= 0n}
+                      className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
+                    >
+                      Continue
+                    </button>
+                  )}
 
                   <div className="grid grid-cols-3 gap-3">
                     {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((value) => (
@@ -963,44 +1169,6 @@ export function WalletPanel() {
                     </button>
                   </div>
                 </div>
-              </div>
-            )}
-
-            {step === 2 && (
-              <div className="flex flex-1 flex-col justify-between pb-6 pt-6 animate-slide-in">
-                <div className="space-y-3">
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-gray-500">
-                    Choose network
-                  </p>
-                  <div className="space-y-2">
-                    {destinationChains.map((option) => (
-                      <button
-                        key={option.key}
-                        type="button"
-                        onClick={() => setDestination(option.key)}
-                        className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm transition ${
-                          destination === option.key
-                            ? 'border-white/40 bg-white/10 text-white'
-                            : 'border-white/10 bg-[#111111] text-gray-300 hover:bg-white/5'
-                        }`}
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <NetworkIcon chainName={option.label} size={18} />
-                          <span>{option.label}</span>
-                        </span>
-                        {destination === option.key ? <span>✓</span> : null}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setStep(3)}
-                  disabled={!destinationConfig}
-                  className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
-                >
-                  Continue
-                </button>
               </div>
             )}
 
