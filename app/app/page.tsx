@@ -3,13 +3,64 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { UserPill } from '@privy-io/react-auth/ui';
-import { usePrivy } from '@privy-io/react-auth';
+import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { WalletPanel } from '@/components/WalletPanel';
 import { PayoutsPanel } from '@/components/PayoutsPanel';
 import { WithdrawalsPanel } from '@/components/WithdrawalsPanel';
+import { truncateAddress } from '@/lib/format';
 
 type AppTab = 'wallet' | 'payouts' | 'withdrawals';
+
+function ChevronDownIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4 text-gray-300" fill="none" aria-hidden="true">
+      <path
+        d="m6 9 6 6 6-6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden="true">
+      <rect
+        x="9"
+        y="9"
+        width="11"
+        height="11"
+        rx="2"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M5 15V6a2 2 0 0 1 2-2h9"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function MenuIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" aria-hidden="true">
+      <path
+        d="M4 7h16M4 12h16M4 17h16"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
 
 function WalletIcon({ active }: { active: boolean }) {
   return (
@@ -64,11 +115,15 @@ function WithdrawIcon({ active }: { active: boolean }) {
 export default function AppPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { wallets } = useWallets();
   const { ready, authenticated } = usePrivy();
   const [focusToken, setFocusToken] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>('wallet');
+  const [copied, setCopied] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const queryFocusToken = searchParams.get('focusToken');
   const queryTab = searchParams.get('tab');
+  const walletAddress = wallets[0]?.address ?? null;
 
   useEffect(() => {
     if (!ready) return;
@@ -92,7 +147,34 @@ export default function AppPage() {
 
   const handleTabChange = (tab: AppTab) => {
     setActiveTab(tab);
+    setMenuOpen(false);
     router.replace(`/app?tab=${tab}`);
+  };
+
+  const handleCopyWalletAddress = async () => {
+    if (!walletAddress) return;
+    try {
+      if (navigator.clipboard?.writeText && window.isSecureContext) {
+        await navigator.clipboard.writeText(walletAddress);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = walletAddress;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        if (!ok) {
+          throw new Error('copy failed');
+        }
+      }
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      setCopied(false);
+    }
   };
 
   if (!ready) {
@@ -108,17 +190,54 @@ export default function AppPage() {
   }
 
   return (
-    <main className="relative h-[100dvh] overflow-hidden bg-[#070912]">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(81,58,212,0.25),_transparent_55%),radial-gradient(circle_at_bottom,_rgba(31,151,255,0.18),_transparent_45%)]" />
-      <div className="relative mx-auto flex h-full w-full max-w-2xl flex-col px-4 pt-4">
-        <header className="mb-4 rounded-2xl border border-white/10 bg-[#121526]/80 px-4 py-3 backdrop-blur">
+    <main className="h-[100dvh] overflow-hidden bg-[#0a0a0a]">
+      <div className="mx-auto flex h-full w-full max-w-md flex-col px-4 pt-4">
+        <header className="relative mb-4 px-1 py-1">
           <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.16em] text-gray-400">Evolute</p>
-              <h1 className="text-lg font-semibold text-white">Wallet</h1>
+            <button
+              type="button"
+              className="inline-flex min-w-0 max-w-[70%] items-center gap-1.5 rounded-xl px-1 py-1 text-left"
+            >
+              <span className="truncate text-base font-semibold text-white">
+                {walletAddress ? truncateAddress(walletAddress) : '—'}
+              </span>
+              <ChevronDownIcon />
+            </button>
+
+            <div className="relative flex items-center gap-2">
+              {walletAddress && (
+                <button
+                  type="button"
+                  onClick={handleCopyWalletAddress}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-200 transition hover:bg-white/10"
+                  aria-label="Copy wallet address"
+                  title={copied ? 'Copied' : 'Copy address'}
+                >
+                  <CopyIcon />
+                </button>
+              )}
+              {copied && (
+                <div className="pointer-events-none absolute right-[calc(100%+0.5rem)] top-1/2 z-20 -translate-y-1/2 whitespace-nowrap rounded-lg border border-white/20 bg-white px-2.5 py-1 text-xs font-medium text-black">
+                  Copied
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setMenuOpen((current) => !current)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-200 transition hover:bg-white/10"
+                aria-label="Open menu"
+              >
+                <MenuIcon />
+              </button>
             </div>
-            <UserPill />
           </div>
+          {menuOpen && (
+            <div className="absolute right-0 top-12 z-20 flex justify-end">
+              <div className="rounded-xl border border-white/10 bg-black/40 px-2 py-1.5">
+                <UserPill />
+              </div>
+            </div>
+          )}
         </header>
 
         <div key={activeTab} className="min-h-0 flex-1 pb-28 animate-fade-in-up">
@@ -133,16 +252,16 @@ export default function AppPage() {
       </div>
 
       <nav
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-[#0c0f1f]/90 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-[#0a0a0a] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3"
         aria-label="Primary"
       >
-        <div className="mx-auto flex w-full max-w-2xl items-center gap-2 rounded-2xl border border-white/10 bg-black/20 p-1.5">
+        <div className="mx-auto flex w-full max-w-md items-center gap-2 rounded-2xl border border-white/10 bg-[#111111] p-1.5">
           <button
             type="button"
             onClick={() => handleTabChange('wallet')}
             className={`flex h-12 flex-1 items-center justify-center gap-2 rounded-xl text-sm font-medium transition ${
               activeTab === 'wallet'
-                ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-[0_6px_20px_rgba(99,102,241,0.35)]'
+                ? 'bg-white/10 text-white'
                 : 'text-gray-300 hover:bg-white/5'
             }`}
           >
@@ -154,7 +273,7 @@ export default function AppPage() {
             onClick={() => handleTabChange('payouts')}
             className={`flex h-12 flex-1 items-center justify-center gap-2 rounded-xl text-sm font-medium transition ${
               activeTab === 'payouts'
-                ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-[0_6px_20px_rgba(99,102,241,0.35)]'
+                ? 'bg-white/10 text-white'
                 : 'text-gray-300 hover:bg-white/5'
             }`}
           >
@@ -166,7 +285,7 @@ export default function AppPage() {
             onClick={() => handleTabChange('withdrawals')}
             className={`flex h-12 flex-1 items-center justify-center gap-2 rounded-xl text-sm font-medium transition ${
               activeTab === 'withdrawals'
-                ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-[0_6px_20px_rgba(99,102,241,0.35)]'
+                ? 'bg-white/10 text-white'
                 : 'text-gray-300 hover:bg-white/5'
             }`}
           >

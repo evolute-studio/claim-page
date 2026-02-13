@@ -28,7 +28,7 @@ export function PrivyProviderWrapper({ children }: { children: React.ReactNode }
         loginMethods: ['email'],
         appearance: {
           theme: 'dark',
-          accentColor: '#7C3AED',
+          accentColor: '#f5f5f5',
           logo: '/logo.png',
         },
         embeddedWallets: {

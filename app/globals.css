@@ -65,3 +65,93 @@ body {
     animation: none;
   }
 }
+
+.withdraw-flow button,
+.interactive-fx {
+  position: relative;
+  overflow: hidden;
+  transform: translateZ(0);
+  transition:
+    transform 160ms ease,
+    filter 270ms ease,
+    box-shadow 300ms ease;
+}
+
+.withdraw-flow button::after,
+.interactive-fx::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: -140% -40%;
+  opacity: 0;
+  transform: translateX(-140%) rotate(12deg);
+  background: linear-gradient(
+    110deg,
+    transparent 34%,
+    rgba(255, 255, 255, 0.16) 50%,
+    transparent 66%
+  );
+  transition:
+    transform 700ms ease,
+    opacity 350ms ease;
+}
+
+.withdraw-flow button:hover:not(:disabled),
+.interactive-fx:hover:not(:disabled) {
+  filter: brightness(2);
+}
+
+.withdraw-flow button:hover:not(:disabled)::after,
+.interactive-fx:hover:not(:disabled)::after {
+  opacity: 0.55;
+  transform: translateX(120%) rotate(12deg);
+}
+
+.withdraw-flow button:active:not(:disabled),
+.interactive-fx:active:not(:disabled) {
+  transform: translateY(1px) scale(0.978);
+  filter: brightness(0.97);
+}
+
+.withdraw-flow button:disabled,
+.interactive-fx:disabled {
+  transform: none;
+  filter: none;
+}
+
+.withdraw-flow button:disabled::after,
+.interactive-fx:disabled::after {
+  display: none;
+}
+
+.withdraw-flow button.no-shimmer::after {
+  display: none;
+}
+
+.withdraw-flow button.no-shimmer {
+  transition: background-color 120ms ease;
+  transform: translateZ(0);
+  background-color: transparent;
+}
+
+.withdraw-flow button.no-shimmer:hover:not(:disabled),
+.withdraw-flow button.no-shimmer:active:not(:disabled) {
+  filter: none;
+  transform: translateZ(0);
+}
+
+.withdraw-flow button.no-shimmer:active:not(:disabled) {
+  background-color: rgba(148, 163, 184, 0.25);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .withdraw-flow button,
+  .interactive-fx {
+    transition: none;
+  }
+
+  .withdraw-flow button::after,
+  .interactive-fx::after {
+    transition: none;
+  }
+}

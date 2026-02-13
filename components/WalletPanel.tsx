@@ -8,6 +8,7 @@ import {
   useSendTransaction,
   useWallets,
 } from '@privy-io/react-auth';
+import type { SendTransactionModalUIOptions } from '@privy-io/react-auth';
 import {
   createPublicClient,
   encodeFunctionData,
@@ -110,6 +111,22 @@ function safeStringify(value: unknown): string {
   );
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timerId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timerId = setTimeout(() => {
+          reject(new Error(`${label} timed out`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timerId) clearTimeout(timerId);
+  }
+}
+
 function getAmountFontSize(displayValue: string): string {
   const length = displayValue.replace('.', '').length || 1;
   const maxSize = 3.2;
@@ -119,7 +136,62 @@ function getAmountFontSize(displayValue: string): string {
   return `${size}rem`;
 }
 
+function buildTxUiOptions(params: {
+  mode: 'transfer' | 'approve' | 'burn';
+  destinationLabel?: string;
+}): SendTransactionModalUIOptions {
+  if (params.mode === 'transfer') {
+    return {
+      description: 'Confirm sending USDC on Base.',
+      buttonText: 'Confirm',
+      transactionInfo: {
+        title: 'Transfer details',
+        action: 'Send USDC',
+        contractInfo: {
+          name: 'USD Coin (USDC)',
+        },
+      },
+      successHeader: 'Transfer submitted',
+      successDescription: 'Transaction has been sent.',
+      isCancellable: true,
+    };
+  }
+
+  if (params.mode === 'approve') {
+    return {
+      description: 'Approve USDC allowance for this bridge transfer.',
+      buttonText: 'Approve',
+      transactionInfo: {
+        title: 'Approval details',
+        action: 'Approve USDC',
+        contractInfo: {
+          name: 'USD Coin (USDC)',
+        },
+      },
+      successHeader: 'Approval submitted',
+      successDescription: 'Allowance transaction has been sent.',
+      isCancellable: true,
+    };
+  }
+
+  return {
+    description: `Confirm bridge transfer to ${params.destinationLabel ?? 'destination network'}.`,
+    buttonText: 'Confirm',
+    transactionInfo: {
+      title: 'Bridge details',
+      action: 'Bridge USDC',
+      contractInfo: {
+        name: 'CCTP TokenMessengerV2',
+      },
+    },
+    successHeader: 'Bridge transaction submitted',
+    successDescription: 'USDC transfer is in progress.',
+    isCancellable: true,
+  };
+}
+
 const MAX_USDC_MINOR = 1_000_000_000_000_000 - 1; // 1 quadrillion - 1 (minor units)
+const MIN_WITHDRAW_RECEIVE_MINOR = 1_000_000; // 1.00 USDC
 
 function isQuoteExpiredError(message: string): boolean {
   const normalized = message.toLowerCase();
@@ -128,25 +200,6 @@ function isQuoteExpiredError(message: string): boolean {
     (normalized.includes('expired') ||
       normalized.includes('not found') ||
       normalized.includes('invalid'))
-  );
-}
-
-function UsdcIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 32 32"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-    >
-      <circle cx="16" cy="16" r="16" fill="#2775CA" />
-      <path
-        d="M20.5 18.5C20.5 16.5 19 15.5 16 15C14 14.5 13.5 14 13.5 13C13.5 12 14.5 11.5 16 11.5C17.5 11.5 18.5 12 19 13L21 12C20.5 10.5 19 9.5 17 9V7H15V9C12.5 9.5 11 11 11 13C11 15 12.5 16 15.5 16.5C17.5 17 18 17.5 18 18.5C18 19.5 17 20.5 15.5 20.5C14 20.5 12.5 19.5 12 18L10 19C10.5 21 12.5 22.5 15 23V25H17V23C19.5 22.5 21 21 20.5 18.5Z"
-        fill="white"
-      />
-    </svg>
   );
 }
 
@@ -229,6 +282,35 @@ function CloseIcon({ size = 18 }: { size?: number }) {
         d="m6 6 12 12"
         stroke="currentColor"
         strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// Send icon shape from Lucide (ISC License), embedded as inline SVG.
+function SendIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="m3 3 3 9-3 9 19-9Z"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6 12h16"
+        stroke="currentColor"
+        strokeWidth="1.9"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -356,7 +438,7 @@ export function WalletPanel() {
 
   const [amountMode] = useState<AmountMode>('receive');
   const [amountInput, setAmountInput] = useState('');
-  const [destination, setDestination] = useState<DestinationChain>('ethereum');
+  const [destination, setDestination] = useState<DestinationChain>('base');
   const [destinationAddress, setDestinationAddress] = useState('');
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [sending, setSending] = useState(false);
@@ -373,12 +455,12 @@ export function WalletPanel() {
     Partial<Record<DestinationChain, number>>
   >({});
   const [networkFeeLoading, setNetworkFeeLoading] = useState(false);
+  const [networkFeeRetryNonce, setNetworkFeeRetryNonce] = useState(0);
   const [balance, setBalance] = useState<string | null>(null);
   const [balanceMinor, setBalanceMinor] = useState<bigint | null>(null);
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [balanceRefreshNonce, setBalanceRefreshNonce] = useState(0);
-  const [copied, setCopied] = useState(false);
   const [step, setStep] = useState<WithdrawStep>(1);
   const [withdrawalId, setWithdrawalId] = useState<string | null>(null);
   const [withdrawalStatus, setWithdrawalStatus] = useState<WithdrawalStatus | null>(null);
@@ -389,6 +471,8 @@ export function WalletPanel() {
   const [showDebug, setShowDebug] = useState(false);
   const quoteRequestId = useRef(0);
   const networkFeeRequestId = useRef(0);
+  const networkFeeFetchInFlightRef = useRef(false);
+  const networkFeeRetryTimerRef = useRef<number | null>(null);
   const lastStatusRef = useRef<string | null>(null);
   const lastForwardHashRef = useRef<string | null>(null);
 
@@ -417,17 +501,23 @@ export function WalletPanel() {
   const destinationConfig = getDestinationConfig(destination, config.sourceChain);
   const networkAvailability = useMemo(() => {
     const availability: Partial<Record<DestinationChain, boolean>> = {};
+    const minRequiredReceive = BigInt(MIN_WITHDRAW_RECEIVE_MINOR);
     destinationChains.forEach((option) => {
-      if (option.key === 'base') {
+      if (balanceMinor === null) {
         availability[option.key] = true;
+        return;
+      }
+      if (option.key === 'base') {
+        availability[option.key] = balanceMinor >= minRequiredReceive;
         return;
       }
       const feeEstimate = networkFeeEstimates[option.key];
-      if (feeEstimate === undefined || balanceMinor === null) {
+      if (feeEstimate === undefined) {
         availability[option.key] = true;
         return;
       }
-      availability[option.key] = balanceMinor >= BigInt(feeEstimate);
+      const minRequiredWithFee = BigInt(feeEstimate) + minRequiredReceive;
+      availability[option.key] = balanceMinor >= minRequiredWithFee;
     });
     return availability;
   }, [balanceMinor, destinationChains, networkFeeEstimates]);
@@ -602,7 +692,7 @@ export function WalletPanel() {
     const payMinor = toNumberSafe(effectiveParsedInputAmount);
     return Math.max(0, payMinor - feeBasisMinor);
   }, [amountMode, effectiveParsedInputAmount, feeBasisMinor, lockedAmountMode, quote]);
-  const minReceiveMinor = 1_000_000;
+  const minReceiveMinor = MIN_WITHDRAW_RECEIVE_MINOR;
   const minPayMinor = feeBasisMinor + minReceiveMinor;
   const belowMinReceive =
     effectiveParsedInputAmount !== null &&
@@ -713,6 +803,7 @@ export function WalletPanel() {
       const value = await navigator.clipboard.readText();
       if (value) {
         setDestinationAddress(value.trim());
+        setFormError(null);
       }
     } catch {
       setFormError('Failed to read clipboard.');
@@ -748,8 +839,6 @@ export function WalletPanel() {
         if (!cancelled) {
           const message = error instanceof Error ? error.message : 'Failed to load balance';
           setBalanceError(message);
-          setBalance(null);
-          setBalanceMinor(null);
         }
       } finally {
         if (!cancelled) {
@@ -800,9 +889,15 @@ export function WalletPanel() {
       (option) => networkFeeEstimates[option.key] !== undefined
     );
     if (hasAllEstimates) return;
+    if (networkFeeFetchInFlightRef.current) return;
 
     let cancelled = false;
     const requestId = ++networkFeeRequestId.current;
+    networkFeeFetchInFlightRef.current = true;
+    if (networkFeeRetryTimerRef.current) {
+      window.clearTimeout(networkFeeRetryTimerRef.current);
+      networkFeeRetryTimerRef.current = null;
+    }
 
     const loadEstimates = async () => {
       setNetworkFeeLoading(true);
@@ -812,50 +907,99 @@ export function WalletPanel() {
         });
       }
       try {
-        const token = await getAuthToken();
-        const results = await Promise.all(
+        const token = await withTimeout(getAuthToken(), 8_000, 'Auth token request');
+        const results = await Promise.allSettled(
           destinationChains.map(async (option) => {
             if (option.key === 'base') {
               return [option.key, 0] as const;
             }
-            const response = await getWithdrawalQuote(token, {
-              dest_chain: option.key,
-              transfer_amount_usdc_minor: 1_000_000,
-            });
+            const response = await withTimeout(
+              getWithdrawalQuote(token, {
+                dest_chain: option.key,
+                transfer_amount_usdc_minor: 1_000_000,
+              }),
+              15_000,
+              `Fee quote ${option.key}`
+            );
             return [option.key, response.max_fee_usdc_minor] as const;
           })
         );
         if (cancelled || networkFeeRequestId.current !== requestId) return;
         const estimateMap: Partial<Record<DestinationChain, number>> = {};
-        results.forEach(([key, fee]) => {
-          estimateMap[key] = fee;
+        const failedChains: string[] = [];
+        const failedReasons: Record<string, string> = {};
+        results.forEach((result, index) => {
+          const optionKey = destinationChains[index]?.key;
+          if (!optionKey) return;
+          if (result.status === 'fulfilled') {
+            const [key, fee] = result.value;
+            estimateMap[key] = fee;
+            return;
+          }
+          failedChains.push(optionKey);
+          failedReasons[optionKey] =
+            result.reason instanceof Error ? result.reason.message : 'Unknown error';
         });
-        setNetworkFeeEstimates(estimateMap);
+        setNetworkFeeEstimates((current) => ({
+          ...current,
+          ...estimateMap,
+        }));
         if (WITHDRAW_DEBUG_ENABLED) {
           pushDebug('estimate:response', 'Network fee estimates received', {
             estimates: estimateMap,
+            failed_chains: failedChains,
+            failed_reasons: failedReasons,
           });
         }
-      } catch {
+        if (failedChains.length > 0) {
+          networkFeeRetryTimerRef.current = window.setTimeout(() => {
+            setNetworkFeeRetryNonce((value) => value + 1);
+          }, 3_000);
+        }
+      } catch (error) {
         if (!cancelled && networkFeeRequestId.current === requestId) {
-          setNetworkFeeEstimates({});
+          networkFeeRetryTimerRef.current = window.setTimeout(() => {
+            setNetworkFeeRetryNonce((value) => value + 1);
+          }, 3_000);
           if (WITHDRAW_DEBUG_ENABLED) {
-            pushDebug('estimate:error', 'Failed to fetch network fee estimates');
+            const message =
+              error instanceof Error ? error.message : 'Failed to fetch network fee estimates';
+            pushDebug('estimate:error', 'Failed to fetch network fee estimates', { message });
           }
         }
       } finally {
-        if (!cancelled && networkFeeRequestId.current === requestId) {
+        if (networkFeeRequestId.current === requestId) {
+          networkFeeFetchInFlightRef.current = false;
           setNetworkFeeLoading(false);
         }
       }
     };
 
-    loadEstimates();
+    void loadEstimates();
 
     return () => {
       cancelled = true;
+      if (networkFeeRequestId.current === requestId) {
+        networkFeeFetchInFlightRef.current = false;
+      }
     };
-  }, [destinationChains, getAuthToken, networkFeeEstimates, pushDebug, step, withdrawOpen]);
+  }, [
+    destinationChains,
+    getAuthToken,
+    networkFeeEstimates,
+    networkFeeRetryNonce,
+    pushDebug,
+    step,
+    withdrawOpen,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (networkFeeRetryTimerRef.current) {
+        window.clearTimeout(networkFeeRetryTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (destination === 'base') {
@@ -1057,11 +1201,23 @@ export function WalletPanel() {
   }, [maxReceivableMinor]);
 
   const requiredPayMinor = useMemo(() => {
-    if (!quote) return null;
     if (amountMode === 'pay') return parsedInputAmount ?? null;
-    return BigInt(quote.total_burn_usdc_minor);
-  }, [amountMode, parsedInputAmount, quote]);
+    if (!parsedInputAmount) return null;
+    if (quote) return BigInt(quote.total_burn_usdc_minor);
+    // Before quote arrives, use fee estimate so balance checks are immediate.
+    return parsedInputAmount + availabilityFeeMinor;
+  }, [amountMode, availabilityFeeMinor, parsedInputAmount, quote]);
   const shouldValidateBalance = !isQuoteLocked && !isProcessingWithdrawal && !sending;
+  const shouldPersistFormError = useMemo(() => {
+    if (!formError) return false;
+    if (!withdrawalId) return false;
+    return (
+      withdrawalStatus === 'FAILED' ||
+      withdrawalStatus === 'EXPIRED' ||
+      withdrawalStatus === 'BURN_SUBMITTED' ||
+      withdrawalStatus === 'FORWARDING_PENDING'
+    );
+  }, [formError, withdrawalId, withdrawalStatus]);
 
   const insufficientBalance =
     shouldValidateBalance &&
@@ -1070,36 +1226,28 @@ export function WalletPanel() {
     balanceMinor < requiredPayMinor;
 
   useEffect(() => {
-    if (isQuoteLocked) return;
-    if (amountMode !== 'receive') return;
-    if (!quote || balanceMinor === null) return;
-    if (!parsedInputAmount) return;
-    const maxFeeMinor = BigInt(quote.max_fee_usdc_minor ?? 0);
-    const maxReceivable = balanceMinor > maxFeeMinor ? balanceMinor - maxFeeMinor : 0n;
-    if (parsedInputAmount > maxReceivable) {
-      const nextValue = maxReceivable === 0n ? '0.00' : formatUnits(maxReceivable, 6);
-      handleAmountChange(nextValue);
-    }
-  }, [amountMode, balanceMinor, handleAmountChange, isQuoteLocked, parsedInputAmount, quote]);
-
-  const handleCopyAddress = async () => {
-    if (!activeWalletAddress) return;
-    try {
-      await navigator.clipboard.writeText(activeWalletAddress);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
-    } catch {
-      setFormError('Failed to copy address');
-    }
-  };
+    if (!formError || shouldPersistFormError) return;
+    const timerId = window.setTimeout(() => {
+      setFormError((current) => (current === formError ? null : current));
+    }, 4200);
+    return () => window.clearTimeout(timerId);
+  }, [formError, shouldPersistFormError]);
 
   const handleOpenWithdraw = () => {
     setFormError(null);
     setAmountInput('');
+    setDestination('base');
     setQuote(null);
     setQuoteError(null);
     setQuoteLoading(false);
     setFeeEstimateMinor(0n);
+    setNetworkFeeLoading(false);
+    setNetworkFeeRetryNonce(0);
+    networkFeeFetchInFlightRef.current = false;
+    if (networkFeeRetryTimerRef.current) {
+      window.clearTimeout(networkFeeRetryTimerRef.current);
+      networkFeeRetryTimerRef.current = null;
+    }
     setLockedQuote(null);
     setLockedAmountInput(null);
     setLockedAmountMode(null);
@@ -1126,10 +1274,18 @@ export function WalletPanel() {
     setFormError(null);
     setSending(false);
     setAmountInput('');
+    setDestination('base');
     setQuote(null);
     setQuoteError(null);
     setQuoteLoading(false);
     setFeeEstimateMinor(0n);
+    setNetworkFeeLoading(false);
+    setNetworkFeeRetryNonce(0);
+    networkFeeFetchInFlightRef.current = false;
+    if (networkFeeRetryTimerRef.current) {
+      window.clearTimeout(networkFeeRetryTimerRef.current);
+      networkFeeRetryTimerRef.current = null;
+    }
     setLockedQuote(null);
     setLockedAmountInput(null);
     setLockedAmountMode(null);
@@ -1250,6 +1406,7 @@ export function WalletPanel() {
           {
             address: activeWalletAddress as `0x${string}`,
             sponsor: true,
+            uiOptions: buildTxUiOptions({ mode: 'transfer' }),
           }
         );
 
@@ -1335,6 +1492,7 @@ export function WalletPanel() {
           {
             address: activeWalletAddress as `0x${string}`,
             sponsor: true,
+            uiOptions: buildTxUiOptions({ mode: 'approve' }),
           }
         );
         if (WITHDRAW_DEBUG_ENABLED) {
@@ -1378,6 +1536,10 @@ export function WalletPanel() {
           {
             address: activeWalletAddress as `0x${string}`,
             sponsor: true,
+            uiOptions: buildTxUiOptions({
+              mode: 'burn',
+              destinationLabel: destinationConfig.label,
+            }),
           }
       );
 
@@ -1472,7 +1634,7 @@ export function WalletPanel() {
     const hasDestinationAddressError =
       destinationAddressTrimmed.length > 0 && !isDestinationAddressValid;
     return (
-      <div className="fixed inset-0 z-50 bg-[#0a0a0a]">
+      <div className="withdraw-flow fixed inset-0 z-50 bg-[#0a0a0a]">
         <div className="relative mx-auto flex h-full w-full max-w-md flex-col px-4 pt-5 pb-8">
           <form className="flex-1 flex flex-col" onSubmit={handleWithdraw}>
             <div className="grid grid-cols-3 items-center">
@@ -1530,13 +1692,21 @@ export function WalletPanel() {
                     {destinationChains.map((option) => {
                       const feeEstimate = networkFeeEstimates[option.key];
                       const feeAffordable = networkAvailability[option.key] !== false;
+                      const minRequiredMinor =
+                        option.key === 'base'
+                          ? MIN_WITHDRAW_RECEIVE_MINOR
+                          : feeEstimate !== undefined
+                            ? feeEstimate + MIN_WITHDRAW_RECEIVE_MINOR
+                            : null;
                       const feeLabel =
                         option.key === 'base'
-                          ? 'No bridge fee'
+                          ? feeAffordable
+                            ? 'No bridge fee'
+                            : 'Insufficient balance for minimum transfer (1.00 USDC)'
                           : !feeAffordable
-                            ? `Insufficient balance for network fee${
-                                feeEstimate !== undefined
-                                  ? ` (≈ ${formatUsdc(feeEstimate)} USDC)`
+                            ? `Insufficient balance for minimum transfer${
+                                minRequiredMinor !== null
+                                  ? ` (≈ ${formatUsdc(minRequiredMinor)} USDC required)`
                                   : ''
                               }`
                             : feeEstimate !== undefined
@@ -1579,7 +1749,7 @@ export function WalletPanel() {
                 <button
                   type="button"
                   onClick={() => setStep(2)}
-                  disabled={!destinationConfig}
+                  disabled={!destinationConfig || networkAvailability[destination] === false}
                   className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
                 >
                   Continue
@@ -1643,10 +1813,7 @@ export function WalletPanel() {
                     </div>
                   </div>
                   <p className="text-xs text-gray-500">
-                    {formattedMaxReceivable ?? '0.00'} USDC available to receive
-                    {destination !== 'base' && availabilityFeeMinor > 0n
-                      ? ` (fee ${formatUsdc(toNumberSafe(availabilityFeeMinor))} USDC)`
-                      : ''}
+                    {formattedMaxReceivable ?? '0.00'} USDC available
                   </p>
                 </div>
 
@@ -1671,7 +1838,7 @@ export function WalletPanel() {
                           const value = (available * BigInt(pct)) / 100n;
                           handleAmountChange(formatUnits(value, 6));
                         }}
-                        className="rounded-2xl border border-white/10 bg-white/5 py-2 text-sm text-white"
+                        className="rounded-2xl border border-white/10 bg-white/5 py-2 text-sm text-white hover:bg-white/15"
                       >
                         {pct}%
                       </button>
@@ -1692,7 +1859,7 @@ export function WalletPanel() {
                             : balanceMinor;
                         handleAmountChange(formatUnits(available, 6));
                       }}
-                      className="rounded-2xl border border-white/10 bg-white/5 py-2 text-sm text-white"
+                      className="rounded-2xl border border-white/10 bg-white/5 py-2 text-sm text-white hover:bg-white/15"
                     >
                       Max
                     </button>
@@ -1733,7 +1900,7 @@ export function WalletPanel() {
                     <button
                       type="button"
                       onClick={() => appendAmountChar('.')}
-                      className="rounded-2xl py-4 text-2xl text-white"
+                      className="no-shimmer rounded-2xl py-4 text-2xl text-white"
                     >
                       .
                     </button>
@@ -1747,7 +1914,7 @@ export function WalletPanel() {
                     <button
                       type="button"
                       onClick={handleAmountBackspace}
-                      className="inline-flex items-center justify-center rounded-2xl py-4 text-white"
+                      className="no-shimmer inline-flex items-center justify-center rounded-2xl py-4 text-white"
                       aria-label="Delete"
                     >
                       <BackspaceIcon />
@@ -2019,45 +2186,18 @@ export function WalletPanel() {
 
   return (
     <aside className="w-full rounded-2xl border border-white/10 bg-[#11152a]/75 p-5 shadow-[0_12px_40px_rgba(4,7,20,0.45)] backdrop-blur animate-fade-in-up space-y-4">
-      <div className="space-y-2">
-        <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400">Your wallet</p>
-        <div className="-mx-1 mt-2 flex w-auto items-center gap-2 rounded-2xl border border-white/10 bg-black/35 px-3 py-2">
-          <p className="min-w-0 flex-1 break-all text-[11px] leading-4 text-white font-mono select-all">
-            {activeWalletAddress ? truncateAddress(activeWalletAddress) : '—'}
+      <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-6 text-center">
+        <p className="text-[11px] uppercase tracking-[0.14em] text-gray-500">Balance</p>
+        {formattedBalance ? (
+          <p className="mt-3 text-4xl font-semibold leading-none text-white">
+            {formattedBalance} USDC
           </p>
-          {activeWalletAddress && (
-            <button
-              type="button"
-              onClick={handleCopyAddress}
-              className="shrink-0 rounded-md border border-white/15 bg-white/5 px-2 py-0.5 text-[11px] text-gray-200 transition hover:bg-white/10"
-            >
-              {copied ? 'Copied' : 'Copy'}
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div>
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="text-[11px] uppercase tracking-[0.12em] text-gray-500">Source network</p>
-          <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-black/35 px-2.5 py-1.5 text-xs text-white">
-            <NetworkIcon chainName={config.sourceChain.name} />
-            <span>{config.sourceChain.name}</span>
-          </div>
-        </div>
-        <div className="mb-1 inline-flex items-center gap-1.5">
-          <UsdcIcon size={15} />
-          <p className="text-[11px] uppercase tracking-[0.12em] text-gray-500">USDC balance</p>
-        </div>
-        {balanceLoading ? (
-          <p className="text-sm text-gray-400">Loading...</p>
         ) : balanceError ? (
-          <p className="text-sm text-red-400">{balanceError}</p>
+          <p className="mt-2 text-sm text-red-400">{balanceError}</p>
+        ) : balanceLoading ? (
+          <p className="mt-2 text-sm text-gray-400">Loading...</p>
         ) : (
-          <p className="inline-flex items-center gap-2 text-2xl font-semibold text-white">
-            <UsdcIcon size={22} />
-            {formattedBalance ?? '0.00'}
-          </p>
+          <p className="mt-3 text-4xl font-semibold leading-none text-white">0.00 USDC</p>
         )}
       </div>
 
@@ -2072,9 +2212,10 @@ export function WalletPanel() {
           type="button"
           onClick={handleOpenWithdraw}
           disabled={!activeWalletAddress || config.errors.length > 0}
-          className="w-full rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 px-3 py-2.5 text-sm font-semibold text-white transition hover:from-indigo-400 hover:to-violet-400 disabled:opacity-50"
+          className="interactive-fx inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-3 py-2.5 text-sm font-semibold text-black transition hover:bg-white/90 disabled:bg-white/10 disabled:text-white/40"
         >
-          Withdraw USDC
+          <SendIcon />
+          Send
         </button>
       ) : null}
     </aside>

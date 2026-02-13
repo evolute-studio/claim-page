@@ -237,7 +237,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
   };
 
   return (
-    <section className="flex h-full min-h-0 w-full flex-col gap-4 rounded-2xl border border-white/10 bg-[#11152a]/75 p-5 shadow-[0_12px_40px_rgba(4,7,20,0.45)] backdrop-blur animate-fade-in-up">
+    <section className="flex h-full min-h-0 w-full flex-col gap-4 rounded-2xl border border-white/10 bg-[#111111] p-5 animate-fade-in-up">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-white">Your payouts</h2>
         <button
@@ -257,7 +257,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
             onClick={() => setActiveFilter(filter.value)}
             className={`rounded-full border px-3 py-1 text-xs transition ${
               activeFilter === filter.value
-                ? 'border-violet-400 bg-violet-500/20 text-violet-200'
+                ? 'border-white/30 bg-white/10 text-white'
                 : 'border-white/15 bg-white/5 text-gray-300 hover:bg-white/10'
             }`}
           >
@@ -287,17 +287,14 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
             const isClaiming = claimingId === itemId;
 
             return (
-              <article
+              <div
                 key={itemId}
-                className="rounded-xl bg-gradient-to-r from-purple-500/40 via-pink-500/30 to-purple-500/40 p-[1px]"
+                className={`rounded-xl border p-4 space-y-3 transition ${
+                  isFocused
+                    ? 'border-white/30 bg-[#151515]'
+                    : 'border-white/10 bg-black/35 hover:border-white/20'
+                }`}
               >
-                <div
-                  className={`rounded-xl border p-4 space-y-3 transition ${
-                    isFocused
-                      ? 'border-violet-400 bg-[#17122b]'
-                      : 'border-white/10 bg-black/35 hover:border-white/20'
-                  }`}
-                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <USDCIcon />
@@ -329,7 +326,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
                         type="button"
                         onClick={() => handleClaim(item)}
                         disabled={isClaiming}
-                        className="flex-1 rounded-lg bg-gradient-to-r from-emerald-600 to-green-500 px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
+                        className="flex-1 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-black transition hover:bg-white/90 disabled:opacity-60"
                       >
                         {isClaiming ? 'Claiming...' : 'Claim payout'}
                       </button>
@@ -342,8 +339,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
                       Details
                     </button>
                   </div>
-                </div>
-              </article>
+              </div>
             );
           })}
 
@@ -362,7 +358,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
 
       {selectedPayout && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#11152a] p-5 space-y-4 animate-sheet-in">
+          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#111111] p-5 space-y-4 animate-sheet-in">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-semibold text-white">Payout details</h3>
@@ -415,7 +411,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
                     href={openExplorerUrl(selectedPayout.chain, selectedPayout.tx_hash)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-2 inline-block text-xs text-purple-300 hover:underline"
+                    className="mt-2 inline-block text-xs text-gray-200 hover:underline"
                   >
                     View in explorer
                   </a>
