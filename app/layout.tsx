@@ -1,11 +1,11 @@
 import type { Metadata } from 'next';
-import { Space_Grotesk } from 'next/font/google';
+import { Outfit } from 'next/font/google';
 import { PrivyProviderWrapper } from '@/lib/privy';
 import './globals.css';
 
-const numberFont = Space_Grotesk({
+const appFont = Outfit({
   subsets: ['latin'],
-  variable: '--font-num',
+  variable: '--font-text',
   display: 'swap',
 });
 
@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic';
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${numberFont.variable} antialiased`}>
+      <body className={`${appFont.variable} antialiased`}>
         <PrivyProviderWrapper>{children}</PrivyProviderWrapper>
       </body>
     </html>

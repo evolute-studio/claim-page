@@ -5,6 +5,8 @@ import { getIdentityToken, useIdentityToken, useWallets } from '@privy-io/react-
 import { confirmClaim, confirmClaimByPayoutId, getMyPayouts } from '@/lib/api';
 import { PayoutPreview, PayoutStatus } from '@/types/payout';
 import { StatusBadge } from '@/components/StatusBadge';
+import { CoinIcon } from '@/components/CoinIcon';
+import { PayoutListCard } from '@/components/PayoutListCard';
 
 const FILTERS: Array<{ label: string; value: 'ALL' | PayoutStatus }> = [
   { label: 'All', value: 'ALL' },
@@ -21,52 +23,19 @@ function formatAmount(item: PayoutPreview): string {
   return `${amount.toFixed(2)} ${item.asset}`;
 }
 
+function formatPillAmount(item: PayoutPreview): string {
+  const amount = item.amount_minor_units / 1_000_000;
+  return `${amount.toFixed(2)} ${item.asset}`;
+}
+
 function formatDate(timestamp?: number): string {
   if (!timestamp) return '—';
   const ms = timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp;
   return new Date(ms).toLocaleString();
 }
 
-function formatTimeRemaining(expiresAt: number): string {
-  const expiresAtMs = expiresAt < 1_000_000_000_000 ? expiresAt * 1000 : expiresAt;
-  const diff = expiresAtMs - Date.now();
-  if (diff <= 0) return 'Expired';
-
-  const totalMinutes = Math.floor(diff / (1000 * 60));
-  if (totalMinutes < 60) {
-    const minutes = Math.max(totalMinutes, 1);
-    return `Expires in ${minutes} minute${minutes > 1 ? 's' : ''}`;
-  }
-
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-  if (days > 0) {
-    return `Expires in ${days} day${days > 1 ? 's' : ''}`;
-  }
-  return `Expires in ${hours} hour${hours > 1 ? 's' : ''}`;
-}
-
 function truncateHash(value: string): string {
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
-}
-
-function USDCIcon() {
-  return (
-    <svg
-      width="40"
-      height="40"
-      viewBox="0 0 32 32"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className="shrink-0"
-    >
-      <circle cx="16" cy="16" r="16" fill="#2775CA" />
-      <path
-        d="M20.5 18.5C20.5 16.5 19 15.5 16 15C14 14.5 13.5 14 13.5 13C13.5 12 14.5 11.5 16 11.5C17.5 11.5 18.5 12 19 13L21 12C20.5 10.5 19 9.5 17 9V7H15V9C12.5 9.5 11 11 11 13C11 15 12.5 16 15.5 16.5C17.5 17 18 17.5 18 18.5C18 19.5 17 20.5 15.5 20.5C14 20.5 12.5 19.5 12 18L10 19C10.5 21 12.5 22.5 15 23V25H17V23C19.5 22.5 21 21 20.5 18.5Z"
-        fill="white"
-      />
-    </svg>
-  );
 }
 
 function openExplorerUrl(chain: string, txHash: string) {
@@ -287,59 +256,16 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
             const isClaiming = claimingId === itemId;
 
             return (
-              <div
+              <PayoutListCard
                 key={itemId}
-                className={`rounded-xl border p-4 space-y-3 transition ${
-                  isFocused
-                    ? 'border-white/30 bg-[#151515]'
-                    : 'border-white/10 bg-black/35 hover:border-white/20'
-                }`}
-              >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <USDCIcon />
-                      <div>
-                        <p className="text-base font-semibold text-white">{formatAmount(item)}</p>
-                        <p className="text-xs text-gray-400 capitalize">{item.chain} Network</p>
-                      </div>
-                    </div>
-                    <StatusBadge status={item.status} />
-                  </div>
-
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs text-gray-500">{formatTimeRemaining(item.expires_at)}</p>
-                    {item.rank ? (
-                      <span className="rounded-full bg-gradient-to-r from-yellow-500 to-orange-500 px-2.5 py-1 text-xs font-bold text-black">
-                        #{item.rank}
-                      </span>
-                    ) : null}
-                  </div>
-
-                  <div className="rounded-lg bg-gray-800/40 p-3">
-                    <p className="text-xs text-gray-500">Recipient</p>
-                    <p className="text-sm text-gray-200">{item.recipient_email || '—'}</p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {canClaim && (
-                      <button
-                        type="button"
-                        onClick={() => handleClaim(item)}
-                        disabled={isClaiming}
-                        className="flex-1 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-black transition hover:bg-white/90 disabled:opacity-60"
-                      >
-                        {isClaiming ? 'Claiming...' : 'Claim payout'}
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setSelectedPayout(item)}
-                      className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-gray-100 transition hover:bg-white/10"
-                    >
-                      Details
-                    </button>
-                  </div>
-              </div>
+                item={item}
+                amountLabel={formatPillAmount(item)}
+                highlighted={isFocused}
+                onDetails={() => setSelectedPayout(item)}
+                canClaim={canClaim}
+                isClaiming={isClaiming}
+                onClaim={() => handleClaim(item)}
+              />
             );
           })}
 
@@ -362,7 +288,17 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-semibold text-white">Payout details</h3>
-                <p className="text-sm text-gray-400">{formatAmount(selectedPayout)}</p>
+                <p className="text-sm text-gray-300">
+                  {(() => {
+                    const [amountPart, assetPart] = formatAmount(selectedPayout).split(' ');
+                    return (
+                      <>
+                        {amountPart}
+                        {assetPart ? <span className="ml-1 text-gray-500">{assetPart}</span> : null}
+                      </>
+                    );
+                  })()}
+                </p>
               </div>
               <button
                 type="button"
@@ -424,6 +360,33 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
                 <p className="text-xs text-red-300">{selectedPayout.failure_reason}</p>
               </div>
             )}
+
+            {(() => {
+              const selectedId =
+                selectedPayout.id ??
+                selectedPayout.payout_id ??
+                selectedPayout.claim_token ??
+                `${selectedPayout.status}-${selectedPayout.expires_at}`;
+              const hasClaimRef =
+                !!selectedPayout.claim_token || !!selectedPayout.payout_id || !!selectedPayout.id;
+              const canClaim =
+                selectedPayout.status === 'CREATED' && hasClaimRef && !!walletAddress;
+              const isClaiming = claimingId === selectedId;
+
+              if (!canClaim) return null;
+
+              return (
+                <button
+                  type="button"
+                  onClick={() => handleClaim(selectedPayout)}
+                  disabled={isClaiming}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-300/30 bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-100 transition-all duration-200 hover:border-emerald-200/50 hover:bg-emerald-500/22 active:translate-y-[1px] active:scale-[0.99] active:bg-emerald-500/18 disabled:opacity-60"
+                >
+                  {!isClaiming ? <CoinIcon /> : null}
+                  {isClaiming ? 'Claiming...' : 'Claim payout'}
+                </button>
+              );
+            })()}
           </div>
         </div>
       )}

@@ -247,7 +247,10 @@ export default function AppPage() {
           )}
         </header>
 
-        <div key={activeTab} className="min-h-0 flex-1 pb-28 animate-fade-in-up">
+        <div
+          key={activeTab}
+          className="min-h-0 flex-1 overflow-y-auto pb-[calc(7rem+env(safe-area-inset-bottom))] pr-1 animate-fade-in-up"
+        >
           {activeTab === 'wallet' ? (
             <WalletPanel />
           ) : activeTab === 'payouts' ? (

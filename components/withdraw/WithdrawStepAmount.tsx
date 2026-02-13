@@ -120,13 +120,15 @@ export function WithdrawStepAmount({
             />
             <span
               style={{ fontSize: amountFontSize, lineHeight: '1.05' }}
-              className={`font-semibold ${insufficientBalance ? 'text-[#ff6b7a]' : 'text-gray-500'}`}
+              className={`font-semibold ${insufficientBalance ? 'text-[#ff6b7a]' : 'text-gray-400'}`}
             >
               USDC
             </span>
           </div>
         </div>
-        <p className="text-xs text-gray-500">{formattedMaxReceivable ?? '0.00'} USDC available</p>
+        <p className="text-xs text-gray-500">
+          {formattedMaxReceivable ?? '0.00'} <span className="text-gray-400">USDC</span> available
+        </p>
       </div>
 
       <div className="space-y-4">

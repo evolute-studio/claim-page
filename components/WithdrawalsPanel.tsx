@@ -17,8 +17,13 @@ const FILTERS: Array<{ label: string; value: 'ALL' | WithdrawalStatus }> = [
 ];
 
 function formatUsdc(minor: number | null | undefined): string {
-  if (minor === null || minor === undefined) return '0.00 USDC';
-  return `${(minor / 1_000_000).toFixed(2)} USDC`;
+  if (minor === null || minor === undefined) return '0.00';
+  return (minor / 1_000_000).toFixed(2);
+}
+
+function formatPillUsdc(minor: number | null | undefined): string {
+  if (minor === null || minor === undefined) return '0.00';
+  return (minor / 1_000_000).toFixed(2);
 }
 
 function formatDate(timestamp?: number | null): string {
@@ -29,6 +34,27 @@ function formatDate(timestamp?: number | null): string {
 
 function truncateHash(value: string): string {
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
+}
+
+function VerticalDotsIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M12 6h.01M12 12h.01M12 18h.01"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 export function WithdrawalsPanel() {
@@ -146,43 +172,32 @@ export function WithdrawalsPanel() {
           {visibleWithdrawals.map((item) => {
             const destinationLabel =
               destinations.find((dest) => dest.key === item.dest_chain)?.label ?? item.dest_chain;
-            const payAmount =
-              item.total_burn_usdc_minor ?? item.transfer_amount_usdc_minor ?? 0;
 
             return (
               <div
                 key={item.id}
-                className="rounded-xl border border-white/10 bg-black/35 p-4 space-y-3 transition hover:border-white/20"
+                className="rounded-2xl border border-white/10 bg-black/35 p-3 transition hover:border-white/20"
               >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-num text-base font-semibold text-white">
-                        {formatUsdc(item.transfer_amount_usdc_minor)} →
-                        <span className="ml-2 text-sm text-gray-300">{destinationLabel}</span>
-                      </p>
-                      <p className="font-num text-xs text-gray-500">
-                        You pay {formatUsdc(payAmount)}
-                      </p>
-                    </div>
-                    <WithdrawalStatusBadge status={item.status} />
-                  </div>
-
-                  <div className="rounded-lg bg-gray-800/40 p-3">
-                    <p className="text-xs text-gray-500">Destination</p>
-                    <p className="text-sm text-gray-200">
-                      {item.dest_address ? truncateAddress(item.dest_address) : '—'}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-num truncate text-base font-semibold leading-5 text-white">
+                      {formatPillUsdc(item.transfer_amount_usdc_minor)}{' '}
+                      <span className="text-gray-400">USDC</span>
                     </p>
+                    <p className="truncate text-xs leading-4 text-gray-400">{destinationLabel}</p>
                   </div>
-
-                  <div className="flex items-center gap-2">
+                  <div className="flex shrink-0 items-center gap-2">
+                    <WithdrawalStatusBadge status={item.status} />
                     <button
                       type="button"
                       onClick={() => setSelected(item)}
-                      className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-gray-100 transition hover:bg-white/10"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-100 transition hover:bg-white/10"
+                      aria-label="Open details"
                     >
-                      Details
+                      <VerticalDotsIcon />
                     </button>
                   </div>
+                </div>
               </div>
             );
           })}
@@ -196,7 +211,8 @@ export function WithdrawalsPanel() {
               <div>
                 <h3 className="text-lg font-semibold text-white">Withdrawal details</h3>
                 <p className="font-num text-sm text-gray-400">
-                  {formatUsdc(selected.transfer_amount_usdc_minor)}
+                  {formatUsdc(selected.transfer_amount_usdc_minor)}{' '}
+                  <span className="text-gray-500">USDC</span>
                 </p>
               </div>
               <button

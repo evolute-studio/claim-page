@@ -129,7 +129,7 @@ export function WithdrawStepReview({
                   : derivedReceiveMinor !== null
                     ? formatUsdc(derivedReceiveMinor)
                     : '0.00'}{' '}
-              USDC
+              <span className="text-gray-400">USDC</span>
             </p>
             <p className="text-xs text-gray-500">{isQuoteLocked ? 'Locked' : quoteTimeRemaining}</p>
           </div>
@@ -164,7 +164,7 @@ export function WithdrawStepReview({
                         ? formatUsdc(derivedPayMinor)
                         : '0.00'
                       : formatUsdc(displayQuote.total_burn_usdc_minor)}{' '}
-                    USDC
+                    <span className="text-gray-400">USDC</span>
                   </span>
                 </p>
                 <p>
@@ -175,11 +175,15 @@ export function WithdrawStepReview({
                       : derivedReceiveMinor !== null
                         ? formatUsdc(derivedReceiveMinor)
                         : '0.00'}{' '}
-                    USDC
+                    <span className="text-gray-400">USDC</span>
                   </span>
                 </p>
                 <p>
-                  Fees: <span className="font-num text-white">{formatUsdc(displayQuote.max_fee_usdc_minor)} USDC</span>
+                  Fees:{' '}
+                  <span className="font-num text-white">
+                    {formatUsdc(displayQuote.max_fee_usdc_minor)}{' '}
+                    <span className="text-gray-400">USDC</span>
+                  </span>
                 </p>
               </>
             ) : (

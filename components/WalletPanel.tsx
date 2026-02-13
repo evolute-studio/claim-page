@@ -19,7 +19,10 @@ import {
   parseUnits,
 } from 'viem';
 import {
+  confirmClaim,
+  confirmClaimByPayoutId,
   createWithdrawal,
+  getMyPayouts,
   getWithdrawalQuote,
   submitBurnTx,
 } from '@/lib/api';
@@ -27,6 +30,9 @@ import { getCctpConfig, getDestinationChains, getDestinationConfig } from '@/lib
 import { WithdrawStepAmount } from '@/components/withdraw/WithdrawStepAmount';
 import { WithdrawStepNetwork } from '@/components/withdraw/WithdrawStepNetwork';
 import { WithdrawStepReview } from '@/components/withdraw/WithdrawStepReview';
+import { CoinIcon } from '@/components/CoinIcon';
+import { PayoutListCard } from '@/components/PayoutListCard';
+import { StatusBadge } from '@/components/StatusBadge';
 import { useNetworkFeeEstimates } from '@/lib/useNetworkFeeEstimates';
 import { useWithdrawalQuote } from '@/lib/useWithdrawalQuote';
 import { useWithdrawalStatus } from '@/lib/useWithdrawalStatus';
@@ -42,6 +48,7 @@ import type {
   DestinationChain,
   WithdrawalQuoteResponse,
 } from '@/types/withdrawal';
+import type { PayoutPreview } from '@/types/payout';
 
 const ZERO_BYTES32 = `0x${'0'.repeat(64)}` as `0x${string}`;
 const MAX_UINT256 = (2n ** 256n - 1n) as bigint;
@@ -423,6 +430,11 @@ export function WalletPanel() {
   const [step, setStep] = useState<WithdrawStep>(1);
   const [debugEvents, setDebugEvents] = useState<WithdrawDebugEvent[]>([]);
   const [showDebug, setShowDebug] = useState(false);
+  const [claimablePayouts, setClaimablePayouts] = useState<PayoutPreview[]>([]);
+  const [claimablePayoutsLoading, setClaimablePayoutsLoading] = useState(false);
+  const [claimablePayoutsError, setClaimablePayoutsError] = useState<string | null>(null);
+  const [claimingPayoutId, setClaimingPayoutId] = useState<string | null>(null);
+  const [selectedPayout, setSelectedPayout] = useState<PayoutPreview | null>(null);
 
   const pushDebug = useCallback(
     (stage: string, message: string, data?: Record<string, unknown>) => {
@@ -1155,6 +1167,119 @@ export function WalletPanel() {
     }
   };
 
+  const formatClaimableAmount = useCallback((item: PayoutPreview): string => {
+    if (item.amount_formatted) return item.amount_formatted;
+    const amount = item.amount_minor_units / 1_000_000;
+    return `${amount.toFixed(2)} ${item.asset}`;
+  }, []);
+
+  const formatClaimablePillAmount = useCallback((item: PayoutPreview): string => {
+    const amount = item.amount_minor_units / 1_000_000;
+    return `${amount.toFixed(2)} ${item.asset}`;
+  }, []);
+
+  const formatPayoutDate = useCallback((timestamp?: number): string => {
+    if (!timestamp) return '—';
+    const ms = timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp;
+    return new Date(ms).toLocaleString();
+  }, []);
+
+  const truncateHash = useCallback((value: string): string => {
+    return `${value.slice(0, 8)}...${value.slice(-6)}`;
+  }, []);
+
+  const openPayoutExplorerUrl = useCallback((chain: string, txHash: string): string => {
+    const normalized = chain.toLowerCase();
+    if (normalized.includes('base')) {
+      return `https://basescan.org/tx/${txHash}`;
+    }
+    if (normalized.includes('arbitrum')) {
+      return `https://arbiscan.io/tx/${txHash}`;
+    }
+    if (normalized.includes('optimism')) {
+      return `https://optimistic.etherscan.io/tx/${txHash}`;
+    }
+    if (normalized.includes('polygon')) {
+      return `https://polygonscan.com/tx/${txHash}`;
+    }
+    if (normalized.includes('ethereum')) {
+      return `https://etherscan.io/tx/${txHash}`;
+    }
+    return '';
+  }, []);
+
+  const loadClaimablePayouts = useCallback(
+    async (mode: 'initial' | 'background' = 'background') => {
+      if (mode === 'initial') setClaimablePayoutsLoading(true);
+      setClaimablePayoutsError(null);
+      try {
+        const token = await getAuthToken();
+        const response = await getMyPayouts(token);
+        const claimable = response.payouts
+          .filter((item) => item.status === 'CREATED')
+          .sort((a, b) => a.expires_at - b.expires_at);
+        setClaimablePayouts(claimable);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Failed to load claimable payouts';
+        setClaimablePayoutsError(message);
+      } finally {
+        if (mode === 'initial') setClaimablePayoutsLoading(false);
+      }
+    },
+    [getAuthToken]
+  );
+
+  const handleClaimablePayoutClaim = useCallback(
+    async (item: PayoutPreview) => {
+      if (!activeWalletAddress) return;
+      const itemId = item.id ?? item.payout_id ?? item.claim_token ?? null;
+      const payoutId = item.payout_id ?? item.id;
+      if (!item.claim_token && !payoutId) return;
+
+      setClaimingPayoutId(itemId);
+      setClaimablePayoutsError(null);
+      try {
+        const token = await getAuthToken();
+        if (item.claim_token) {
+          try {
+            await confirmClaim(item.claim_token, activeWalletAddress, token);
+          } catch (claimByTokenError) {
+            const message =
+              claimByTokenError instanceof Error ? claimByTokenError.message : 'Claim failed';
+            const canRetryById = !!payoutId && message.toLowerCase().includes('missing claim_token');
+            if (!canRetryById) {
+              throw claimByTokenError;
+            }
+            await confirmClaimByPayoutId(payoutId, activeWalletAddress, token);
+          }
+        } else if (payoutId) {
+          await confirmClaimByPayoutId(payoutId, activeWalletAddress, token);
+        }
+        await loadClaimablePayouts('background');
+      } catch (claimError) {
+        const message = claimError instanceof Error ? claimError.message : 'Claim failed';
+        setClaimablePayoutsError(
+          message === 'Missing claim token'
+            ? 'Server expects claim token for this payout. Check `/payouts/me` response fields.'
+            : message
+        );
+      } finally {
+        setClaimingPayoutId(null);
+      }
+    },
+    [activeWalletAddress, getAuthToken, loadClaimablePayouts]
+  );
+
+  useEffect(() => {
+    if (withdrawOpen) return;
+    void loadClaimablePayouts('initial');
+    const timerId = window.setInterval(() => {
+      void loadClaimablePayouts('background');
+    }, 20_000);
+    return () => window.clearInterval(timerId);
+  }, [loadClaimablePayouts, withdrawOpen]);
+
   if (withdrawOpen) {
     const headerTitle = step === 4 ? 'Review' : 'Send';
     const amountDisplay = effectiveAmountInput || '0.00';
@@ -1355,24 +1480,26 @@ export function WalletPanel() {
   }
 
   return (
-    <aside className="w-full rounded-2xl border border-white/10 bg-[#0f1118] p-4 shadow-[0_16px_44px_rgba(0,0,0,0.42)] backdrop-blur animate-fade-in-up space-y-4">
-      <div className="rounded-2xl border border-white/10 bg-[#0b0d12] px-4 py-7 text-center">
+    <aside className="flex h-full min-h-0 w-full flex-col animate-fade-in-up pt-8">
+      <div className="px-1 text-center">
         <p className="font-num text-base uppercase tracking-[0.14em] text-gray-500">Your balance</p>
         {formattedBalance ? (
-          <p className="font-num mt-3 text-5xl font-semibold leading-none text-white">
-            {formattedBalance} USDC
+          <p className="font-num mt-4 text-5xl font-semibold leading-none tracking-[0.04em] text-white">
+            {formattedBalance} <span className="text-gray-400">USDC</span>
           </p>
         ) : balanceError ? (
           <p className="mt-2 text-sm text-red-400">{balanceError}</p>
         ) : balanceLoading ? (
           <p className="mt-2 text-sm text-gray-400">Loading...</p>
         ) : (
-          <p className="font-num mt-3 text-5xl font-semibold leading-none text-white">0.00 USDC</p>
+          <p className="font-num mt-4 text-5xl font-semibold leading-none tracking-[0.04em] text-white">
+            0.00 <span className="text-gray-400">USDC</span>
+          </p>
         )}
       </div>
 
       {config.errors.length > 0 && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
+        <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
           Missing config: {config.errors.join(', ')}
         </div>
       )}
@@ -1382,12 +1509,164 @@ export function WalletPanel() {
           type="button"
           onClick={handleOpenWithdraw}
           disabled={!activeWalletAddress || config.errors.length > 0}
-          className="interactive-fx inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-3 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:bg-white/10 disabled:text-white/40"
+          className="interactive-fx no-shimmer mt-14 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-3 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:bg-white/10 disabled:text-white/40"
         >
           <SendIcon />
-          Send
+          <span className="font-num tracking-[0.04em]">Send</span>
         </button>
       ) : null}
+
+      {!withdrawOpen && (
+        <div className="mt-6 flex min-h-0 flex-1 flex-col">
+          <div className="mb-2">
+            <p className="text-xs uppercase tracking-[0.14em] text-gray-500">Claimable payouts</p>
+          </div>
+
+          {claimablePayoutsError && (
+            <p className="mb-2 text-xs text-red-400">{claimablePayoutsError}</p>
+          )}
+
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            {claimablePayoutsLoading ? (
+              <p className="text-sm text-gray-400">Loading payouts...</p>
+            ) : claimablePayouts.length === 0 ? (
+              <p className="text-sm text-gray-500">No claimable payouts.</p>
+            ) : (
+              <div className="space-y-3 pb-2">
+                {claimablePayouts.map((item) => {
+                  const key =
+                    item.id ?? item.payout_id ?? item.claim_token ?? `${item.status}-${item.expires_at}`;
+                  const hasClaimRef = !!item.claim_token || !!item.payout_id || !!item.id;
+                  const canClaim = item.status === 'CREATED' && hasClaimRef && !!activeWalletAddress;
+                  const isClaiming = claimingPayoutId === key;
+                  return (
+                    <PayoutListCard
+                      key={key}
+                      item={item}
+                      amountLabel={formatClaimablePillAmount(item)}
+                      showStatus={false}
+                      variant="wallet"
+                      onDetails={() => setSelectedPayout(item)}
+                      canClaim={canClaim}
+                      isClaiming={isClaiming}
+                      onClaim={() => void handleClaimablePayoutClaim(item)}
+                    />
+                  );
+                })}
+              </div>
+          )}
+          </div>
+        </div>
+      )}
+
+      {selectedPayout && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#111111] p-5 space-y-4 animate-sheet-in">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-white">Payout details</h3>
+                <p className="text-sm text-gray-300">
+                  {(() => {
+                    const [amountPart, assetPart] = formatClaimableAmount(selectedPayout).split(' ');
+                    return (
+                      <>
+                        {amountPart}
+                        {assetPart ? <span className="ml-1 text-gray-500">{assetPart}</span> : null}
+                      </>
+                    );
+                  })()}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedPayout(null)}
+                className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1 text-xs text-gray-100 transition hover:bg-white/10"
+              >
+                Close
+              </button>
+            </div>
+
+            <StatusBadge status={selectedPayout.status} />
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <p className="text-gray-500">Chain</p>
+                <p className="text-gray-200">{selectedPayout.chain}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Recipient</p>
+                <p className="text-gray-200">{selectedPayout.recipient_email || '—'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Created</p>
+                <p className="text-gray-200">{formatPayoutDate(selectedPayout.created_at)}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Updated</p>
+                <p className="text-gray-200">{formatPayoutDate(selectedPayout.updated_at)}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Claimed</p>
+                <p className="text-gray-200">{formatPayoutDate(selectedPayout.claimed_at)}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Paid</p>
+                <p className="text-gray-200">{formatPayoutDate(selectedPayout.paid_at)}</p>
+              </div>
+            </div>
+
+            {selectedPayout.tx_hash && (
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Transaction</p>
+                <p className="text-xs text-gray-300 break-all">{truncateHash(selectedPayout.tx_hash)}</p>
+                {openPayoutExplorerUrl(selectedPayout.chain, selectedPayout.tx_hash) && (
+                  <a
+                    href={openPayoutExplorerUrl(selectedPayout.chain, selectedPayout.tx_hash)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 inline-block text-xs text-gray-200 hover:underline"
+                  >
+                    View in explorer
+                  </a>
+                )}
+              </div>
+            )}
+
+            {selectedPayout.failure_reason && (
+              <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3">
+                <p className="text-xs text-red-300">{selectedPayout.failure_reason}</p>
+              </div>
+            )}
+
+            {(() => {
+              const selectedId =
+                selectedPayout.id ??
+                selectedPayout.payout_id ??
+                selectedPayout.claim_token ??
+                `${selectedPayout.status}-${selectedPayout.expires_at}`;
+              const hasClaimRef =
+                !!selectedPayout.claim_token || !!selectedPayout.payout_id || !!selectedPayout.id;
+              const canClaim =
+                selectedPayout.status === 'CREATED' && hasClaimRef && !!activeWalletAddress;
+              const isClaiming = claimingPayoutId === selectedId;
+
+              if (!canClaim) return null;
+
+              return (
+                <button
+                  type="button"
+                  onClick={() => void handleClaimablePayoutClaim(selectedPayout)}
+                  disabled={isClaiming}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-300/30 bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-100 transition-all duration-200 hover:border-emerald-200/50 hover:bg-emerald-500/22 active:translate-y-[1px] active:scale-[0.99] active:bg-emerald-500/18 disabled:opacity-60"
+                >
+                  {!isClaiming ? <CoinIcon /> : null}
+                  {isClaiming ? 'Claiming...' : 'Claim payout'}
+                </button>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
