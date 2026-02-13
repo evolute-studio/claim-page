@@ -119,7 +119,7 @@ export function WithdrawStepReview({
 
         <div className="rounded-2xl border border-white/10 bg-[#111111] p-4 space-y-3">
           <div className="text-center">
-            <p className="text-2xl font-semibold text-white">
+            <p className="font-num text-2xl font-semibold text-white">
               {(lockedAmountMode ?? amountMode) === 'pay'
                 ? derivedPayMinor !== null
                   ? formatUsdc(derivedPayMinor)
@@ -158,7 +158,7 @@ export function WithdrawStepReview({
               <>
                 <p>
                   You pay:{' '}
-                  <span className="text-white">
+                  <span className="font-num text-white">
                     {displayMode === 'pay'
                       ? derivedPayMinor !== null
                         ? formatUsdc(derivedPayMinor)
@@ -169,7 +169,7 @@ export function WithdrawStepReview({
                 </p>
                 <p>
                   You receive:{' '}
-                  <span className="text-white">
+                  <span className="font-num text-white">
                     {displayMode === 'receive'
                       ? formatUsdc(displayQuote.transfer_amount_usdc_minor)
                       : derivedReceiveMinor !== null
@@ -179,7 +179,7 @@ export function WithdrawStepReview({
                   </span>
                 </p>
                 <p>
-                  Fees: <span className="text-white">{formatUsdc(displayQuote.max_fee_usdc_minor)} USDC</span>
+                  Fees: <span className="font-num text-white">{formatUsdc(displayQuote.max_fee_usdc_minor)} USDC</span>
                 </p>
               </>
             ) : (

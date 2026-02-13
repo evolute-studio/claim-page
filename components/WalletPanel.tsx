@@ -1355,11 +1355,11 @@ export function WalletPanel() {
   }
 
   return (
-    <aside className="w-full rounded-2xl border border-white/10 bg-[#11152a]/75 p-5 shadow-[0_12px_40px_rgba(4,7,20,0.45)] backdrop-blur animate-fade-in-up space-y-4">
-      <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-6 text-center">
-        <p className="text-[11px] uppercase tracking-[0.14em] text-gray-500">Balance</p>
+    <aside className="w-full rounded-2xl border border-white/10 bg-[#0f1118] p-4 shadow-[0_16px_44px_rgba(0,0,0,0.42)] backdrop-blur animate-fade-in-up space-y-4">
+      <div className="rounded-2xl border border-white/10 bg-[#0b0d12] px-4 py-7 text-center">
+        <p className="font-num text-base uppercase tracking-[0.14em] text-gray-500">Your balance</p>
         {formattedBalance ? (
-          <p className="mt-3 text-4xl font-semibold leading-none text-white">
+          <p className="font-num mt-3 text-5xl font-semibold leading-none text-white">
             {formattedBalance} USDC
           </p>
         ) : balanceError ? (
@@ -1367,7 +1367,7 @@ export function WalletPanel() {
         ) : balanceLoading ? (
           <p className="mt-2 text-sm text-gray-400">Loading...</p>
         ) : (
-          <p className="mt-3 text-4xl font-semibold leading-none text-white">0.00 USDC</p>
+          <p className="font-num mt-3 text-5xl font-semibold leading-none text-white">0.00 USDC</p>
         )}
       </div>
 
@@ -1382,7 +1382,7 @@ export function WalletPanel() {
           type="button"
           onClick={handleOpenWithdraw}
           disabled={!activeWalletAddress || config.errors.length > 0}
-          className="interactive-fx inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-3 py-2.5 text-sm font-semibold text-black transition hover:bg-white/90 disabled:bg-white/10 disabled:text-white/40"
+          className="interactive-fx inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-3 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:bg-white/10 disabled:text-white/40"
         >
           <SendIcon />
           Send

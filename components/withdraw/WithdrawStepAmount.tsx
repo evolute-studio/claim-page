@@ -114,7 +114,7 @@ export function WithdrawStepAmount({
                 fontSize: amountFontSize,
                 lineHeight: '1.05',
               }}
-              className={`bg-transparent text-center font-semibold tracking-tight focus:outline-none ${
+              className={`font-num bg-transparent text-center font-semibold tracking-tight focus:outline-none ${
                 insufficientBalance ? 'text-[#ff6b7a]' : amountInput.trim() ? 'text-white' : 'text-gray-500'
               }`}
             />

@@ -156,11 +156,11 @@ export function WithdrawalsPanel() {
               >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-base font-semibold text-white">
+                      <p className="font-num text-base font-semibold text-white">
                         {formatUsdc(item.transfer_amount_usdc_minor)} →
                         <span className="ml-2 text-sm text-gray-300">{destinationLabel}</span>
                       </p>
-                      <p className="text-xs text-gray-500">
+                      <p className="font-num text-xs text-gray-500">
                         You pay {formatUsdc(payAmount)}
                       </p>
                     </div>
@@ -195,7 +195,7 @@ export function WithdrawalsPanel() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-semibold text-white">Withdrawal details</h3>
-                <p className="text-sm text-gray-400">
+                <p className="font-num text-sm text-gray-400">
                   {formatUsdc(selected.transfer_amount_usdc_minor)}
                 </p>
               </div>
