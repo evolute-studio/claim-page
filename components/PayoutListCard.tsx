@@ -58,7 +58,7 @@ export function PayoutListCard({
 
   return (
     <div
-      className={`rounded-2xl border transition ${
+      className={`overflow-hidden rounded-2xl border transition ${
         highlighted
           ? 'border-white/18 bg-[#151515]'
           : isWalletVariant
@@ -105,7 +105,7 @@ export function PayoutListCard({
           type="button"
           onClick={onClaim}
           disabled={isClaiming}
-          className={`inline-flex w-full items-center justify-center gap-2 border border-emerald-400/35 bg-emerald-500/12 text-sm font-semibold text-emerald-100 transition-all duration-200 hover:border-emerald-300/55 hover:bg-emerald-500/18 active:translate-y-[1px] active:scale-[0.99] active:bg-emerald-500/15 disabled:opacity-60 ${
+          className={`inline-flex items-center justify-center gap-2 border border-emerald-400/35 bg-emerald-500/12 text-sm font-semibold text-emerald-100 transition-all duration-200 hover:border-emerald-300/55 hover:bg-emerald-500/18 active:translate-y-[1px] active:scale-[0.99] active:bg-emerald-500/15 disabled:opacity-60 ${
             isWalletVariant
               ? 'mb-4 ml-4 mr-4 mt-0 h-11 w-[calc(100%-2rem)] rounded-xl'
               : 'mb-3 ml-3 mr-3 mt-0 w-[calc(100%-1.5rem)] rounded-xl px-3 py-2'
