@@ -12,15 +12,20 @@ import { truncateAddress } from '@/lib/format';
 
 type AppTab = 'wallet' | 'payouts' | 'withdrawals';
 
-function ChevronDownIcon() {
+function AccountIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4 text-gray-300" fill="none" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      className="mt-0.5 h-5 w-5 text-gray-300"
+      fill="none"
+      aria-hidden="false"
+    >
+      <circle cx="12" cy="8" r="3.5" stroke="currentColor" strokeWidth="1.8" />
       <path
-        d="m6 9 6 6 6-6"
+        d="M5.5 18a6.5 6.5 0 0 1 13 0"
         stroke="currentColor"
-        strokeWidth="2"
+        strokeWidth="1.8"
         strokeLinecap="round"
-        strokeLinejoin="round"
       />
     </svg>
   );
@@ -196,12 +201,14 @@ export default function AppPage() {
           <div className="flex items-center justify-between gap-3">
             <button
               type="button"
-              className="inline-flex min-w-0 max-w-[70%] items-center gap-1.5 rounded-xl px-1 py-1 text-left"
+              className="inline-flex h-10 min-w-0 max-w-[70%] items-center justify-center gap-1 rounded-full border border-white/15 bg-white/5 px-3 transition hover:bg-white/10"
             >
-              <span className="truncate text-base font-semibold text-white">
-                {walletAddress ? truncateAddress(walletAddress) : '—'}
+              <span className="inline-flex min-w-0 items-center gap-1 overflow-hidden">
+                <AccountIcon />
+                <span className="text-base font-semibold text-white">
+                  {walletAddress ? truncateAddress(walletAddress) : '—'}
+                </span>
               </span>
-              <ChevronDownIcon />
             </button>
 
             <div className="relative flex items-center gap-2">

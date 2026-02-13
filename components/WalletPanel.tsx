@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
   getIdentityToken,
@@ -21,15 +21,26 @@ import {
 import {
   createWithdrawal,
   getWithdrawalQuote,
-  getWithdrawalStatus,
   submitBurnTx,
 } from '@/lib/api';
 import { getCctpConfig, getDestinationChains, getDestinationConfig } from '@/lib/cctp';
-import { truncateAddress } from '@/lib/format';
+import { WithdrawStepAmount } from '@/components/withdraw/WithdrawStepAmount';
+import { WithdrawStepNetwork } from '@/components/withdraw/WithdrawStepNetwork';
+import { WithdrawStepReview } from '@/components/withdraw/WithdrawStepReview';
+import { useNetworkFeeEstimates } from '@/lib/useNetworkFeeEstimates';
+import { useWithdrawalQuote } from '@/lib/useWithdrawalQuote';
+import { useWithdrawalStatus } from '@/lib/useWithdrawalStatus';
+import { useWithdrawBalance } from '@/lib/useWithdrawBalance';
+import {
+  clampUsdcInput,
+  formatUsdc,
+  isQuoteExpiredError,
+  MIN_WITHDRAW_RECEIVE_MINOR,
+  toNumberSafe,
+} from '@/lib/withdraw';
 import type {
   DestinationChain,
   WithdrawalQuoteResponse,
-  WithdrawalStatus,
 } from '@/types/withdrawal';
 
 const ZERO_BYTES32 = `0x${'0'.repeat(64)}` as `0x${string}`;
@@ -68,33 +79,6 @@ function addressToBytes32(address: string): `0x${string}` {
   return `0x${stripped.padStart(64, '0')}` as `0x${string}`;
 }
 
-function toNumberSafe(value: bigint | null): number {
-  if (value === null) return 0;
-  const asNumber = Number(value);
-  if (!Number.isFinite(asNumber)) return 0;
-  return asNumber;
-}
-
-function normalizeTimestamp(value?: number): number | null {
-  if (!value) return null;
-  return value < 1_000_000_000_000 ? value * 1000 : value;
-}
-
-function formatUsdc(minorUnits?: number | null): string {
-  if (minorUnits === null || minorUnits === undefined) return '0.00';
-  return (minorUnits / 1_000_000).toFixed(2);
-}
-
-function timeRemainingLabel(expiresAtMs?: number | null): string {
-  if (!expiresAtMs) return '';
-  const diff = expiresAtMs - Date.now();
-  if (diff <= 0) return 'Expired';
-  const seconds = Math.max(1, Math.floor(diff / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m`;
-}
-
 function safeStringify(value: unknown): string {
   const seen = new WeakSet<object>();
   return JSON.stringify(
@@ -109,22 +93,6 @@ function safeStringify(value: unknown): string {
     },
     2
   );
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  let timerId: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timerId = setTimeout(() => {
-          reject(new Error(`${label} timed out`));
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timerId) clearTimeout(timerId);
-  }
 }
 
 function getAmountFontSize(displayValue: string): string {
@@ -188,19 +156,6 @@ function buildTxUiOptions(params: {
     successDescription: 'USDC transfer is in progress.',
     isCancellable: true,
   };
-}
-
-const MAX_USDC_MINOR = 1_000_000_000_000_000 - 1; // 1 quadrillion - 1 (minor units)
-const MIN_WITHDRAW_RECEIVE_MINOR = 1_000_000; // 1.00 USDC
-
-function isQuoteExpiredError(message: string): boolean {
-  const normalized = message.toLowerCase();
-  return (
-    normalized.includes('quote') &&
-    (normalized.includes('expired') ||
-      normalized.includes('not found') ||
-      normalized.includes('invalid'))
-  );
 }
 
 // Backspace icon shape from Lucide (ISC License), embedded as inline SVG.
@@ -435,6 +390,25 @@ export function WalletPanel() {
   const { identityToken } = useIdentityToken();
   const { sendTransaction } = useSendTransaction();
   const config = useMemo(() => getCctpConfig(), []);
+  const publicClient = useMemo(() => {
+    return createPublicClient({
+      chain: config.sourceChain,
+      transport: http(),
+    });
+  }, [config.sourceChain]);
+  const getAuthToken = useCallback(async () => {
+    let freshToken: string | null = null;
+    try {
+      freshToken = await getIdentityToken();
+    } catch {
+      freshToken = null;
+    }
+    const token = freshToken ?? identityToken;
+    if (!token) {
+      throw new Error('Missing identity token. Please re-login.');
+    }
+    return token;
+  }, [identityToken]);
 
   const [amountMode] = useState<AmountMode>('receive');
   const [amountInput, setAmountInput] = useState('');
@@ -443,38 +417,12 @@ export function WalletPanel() {
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [quoteError, setQuoteError] = useState<string | null>(null);
-  const [quote, setQuote] = useState<WithdrawalQuoteResponse | null>(null);
-  const [quoteLoading, setQuoteLoading] = useState(false);
-  const [quoteRefreshNonce, setQuoteRefreshNonce] = useState(0);
-  const [quoteTick, setQuoteTick] = useState(0);
   const [lockedQuote, setLockedQuote] = useState<WithdrawalQuoteResponse | null>(null);
   const [lockedAmountInput, setLockedAmountInput] = useState<string | null>(null);
   const [lockedAmountMode, setLockedAmountMode] = useState<AmountMode | null>(null);
-  const [networkFeeEstimates, setNetworkFeeEstimates] = useState<
-    Partial<Record<DestinationChain, number>>
-  >({});
-  const [networkFeeLoading, setNetworkFeeLoading] = useState(false);
-  const [networkFeeRetryNonce, setNetworkFeeRetryNonce] = useState(0);
-  const [balance, setBalance] = useState<string | null>(null);
-  const [balanceMinor, setBalanceMinor] = useState<bigint | null>(null);
-  const [balanceError, setBalanceError] = useState<string | null>(null);
-  const [balanceLoading, setBalanceLoading] = useState(false);
-  const [balanceRefreshNonce, setBalanceRefreshNonce] = useState(0);
   const [step, setStep] = useState<WithdrawStep>(1);
-  const [withdrawalId, setWithdrawalId] = useState<string | null>(null);
-  const [withdrawalStatus, setWithdrawalStatus] = useState<WithdrawalStatus | null>(null);
-  const [burnTxHash, setBurnTxHash] = useState<string | null>(null);
-  const [forwardTxHash, setForwardTxHash] = useState<string | null>(null);
-  const [feeEstimateMinor, setFeeEstimateMinor] = useState<bigint>(0n);
   const [debugEvents, setDebugEvents] = useState<WithdrawDebugEvent[]>([]);
   const [showDebug, setShowDebug] = useState(false);
-  const quoteRequestId = useRef(0);
-  const networkFeeRequestId = useRef(0);
-  const networkFeeFetchInFlightRef = useRef(false);
-  const networkFeeRetryTimerRef = useRef<number | null>(null);
-  const lastStatusRef = useRef<string | null>(null);
-  const lastForwardHashRef = useRef<string | null>(null);
 
   const pushDebug = useCallback(
     (stage: string, message: string, data?: Record<string, unknown>) => {
@@ -492,12 +440,68 @@ export function WalletPanel() {
     },
     []
   );
+  const {
+    withdrawalId,
+    setWithdrawalId,
+    withdrawalStatus,
+    setWithdrawalStatus,
+    burnTxHash,
+    setBurnTxHash,
+    forwardTxHash,
+    setForwardTxHash,
+    resetWithdrawalTracking,
+  } = useWithdrawalStatus({
+    getAuthToken,
+    debugEnabled: WITHDRAW_DEBUG_ENABLED,
+    pushDebug,
+    onFailureReason: setFormError,
+    onPollingError: setFormError,
+  });
 
   const activeWalletAddress = wallets[0]?.address ?? null;
+  const readUsdcBalance = useCallback(async () => {
+    if (!activeWalletAddress || !config.usdcAddress) {
+      throw new Error('Missing wallet or USDC address');
+    }
+    return publicClient.readContract({
+      address: config.usdcAddress as `0x${string}`,
+      abi: erc20Abi,
+      functionName: 'balanceOf',
+      args: [activeWalletAddress as `0x${string}`],
+    });
+  }, [activeWalletAddress, config.usdcAddress, publicClient]);
+  const { balance, balanceMinor, balanceError, balanceLoading, refreshBalance } = useWithdrawBalance({
+    activeWalletAddress,
+    usdcAddress: config.usdcAddress,
+    readBalance: activeWalletAddress && config.usdcAddress ? readUsdcBalance : null,
+  });
   const destinationChains = useMemo(
     () => getDestinationChains(config.sourceChain),
     [config.sourceChain]
   );
+  const fetchNetworkFeeQuote = useCallback(
+    async (token: string, chain: DestinationChain) => {
+      const response = await getWithdrawalQuote(token, {
+        dest_chain: chain,
+        transfer_amount_usdc_minor: 1_000_000,
+      });
+      return response.max_fee_usdc_minor;
+    },
+    []
+  );
+  const {
+    networkFeeEstimates,
+    networkFeeLoading,
+    resetNetworkFeeRuntimeState,
+  } = useNetworkFeeEstimates({
+    withdrawOpen,
+    step,
+    destinationChains,
+    getAuthToken,
+    fetchFeeQuote: fetchNetworkFeeQuote,
+    debugEnabled: WITHDRAW_DEBUG_ENABLED,
+    pushDebug,
+  });
   const destinationConfig = getDestinationConfig(destination, config.sourceChain);
   const networkAvailability = useMemo(() => {
     const availability: Partial<Record<DestinationChain, boolean>> = {};
@@ -538,69 +542,10 @@ export function WalletPanel() {
   }, [destination, pushDebug, withdrawOpen]);
 
   useEffect(() => {
-    if (!WITHDRAW_DEBUG_ENABLED || !quote) return;
-    pushDebug('quote:normalized', 'Quote stored', {
-      quote_id: quote.quote_id,
-      dest_chain: quote.dest_chain,
-      transfer_amount_usdc_minor: quote.transfer_amount_usdc_minor,
-      max_fee_usdc_minor: quote.max_fee_usdc_minor,
-      total_burn_usdc_minor: quote.total_burn_usdc_minor,
-      fee_protocol_usdc_minor: quote.fee_protocol_usdc_minor,
-      fee_forward_usdc_minor: quote.fee_forward_usdc_minor,
-      expires_at: quote.expires_at,
-      finality_threshold: quote.finality_threshold,
-      forward_fee_level: quote.forward_fee_level,
-    });
-  }, [quote, pushDebug]);
-
-  useEffect(() => {
-    if (!WITHDRAW_DEBUG_ENABLED || !quoteError) return;
-    pushDebug('quote:error', 'Quote error', { message: quoteError });
-  }, [quoteError, pushDebug]);
-
-  useEffect(() => {
     if (!WITHDRAW_DEBUG_ENABLED || !formError) return;
     pushDebug('form:error', 'Form error', { message: formError });
   }, [formError, pushDebug]);
-
-  useEffect(() => {
-    if (!WITHDRAW_DEBUG_ENABLED || !withdrawalStatus) return;
-    if (lastStatusRef.current === withdrawalStatus) return;
-    lastStatusRef.current = withdrawalStatus;
-    pushDebug('status', 'Withdrawal status update', {
-      withdrawal_id: withdrawalId,
-      status: withdrawalStatus,
-    });
-  }, [pushDebug, withdrawalId, withdrawalStatus]);
-
-  useEffect(() => {
-    if (!WITHDRAW_DEBUG_ENABLED || !forwardTxHash) return;
-    if (lastForwardHashRef.current === forwardTxHash) return;
-    lastForwardHashRef.current = forwardTxHash;
-    pushDebug('status', 'Forward tx hash received', {
-      withdrawal_id: withdrawalId,
-      forward_tx_hash: forwardTxHash,
-    });
-  }, [forwardTxHash, pushDebug, withdrawalId]);
-  const clampAmountInput = useCallback((raw: string) => {
-    const cleaned = raw.replace(/[^0-9.]/g, '');
-    if (!cleaned) return '';
-    const [wholeRaw = '', fractionRaw = ''] = cleaned.split('.');
-    const whole = wholeRaw.replace(/^0+(?=\d)/, '');
-    const fraction = fractionRaw.slice(0, 6);
-    const normalized = cleaned.includes('.')
-      ? `${whole || '0'}.${fraction}`
-      : whole || '0';
-    try {
-      const minor = parseUnits(normalized, 6);
-      if (minor > BigInt(MAX_USDC_MINOR)) {
-        return '999999999999999.999999';
-      }
-    } catch {
-      return normalized;
-    }
-    return normalized;
-  }, []);
+  const clampAmountInput = useCallback((raw: string) => clampUsdcInput(raw), []);
   const handleAmountChange = useCallback(
     (value: string) => {
       setAmountInput(clampAmountInput(value));
@@ -645,23 +590,32 @@ export function WalletPanel() {
       return null;
     }
   }, [effectiveAmountInput]);
-
-  const quoteRequestAmount = useMemo(() => {
-    if (!parsedInputAmount) return null;
-    if (amountMode === 'receive') return parsedInputAmount;
-    if (parsedInputAmount <= feeEstimateMinor) return 0n;
-    return parsedInputAmount - feeEstimateMinor;
-  }, [amountMode, feeEstimateMinor, parsedInputAmount]);
-
-  const quoteExpiresAtMs = useMemo(() => normalizeTimestamp(quote?.expires_at), [quote?.expires_at]);
-  const quoteExpired = quoteExpiresAtMs ? quoteExpiresAtMs <= Date.now() : false;
-  const quoteTimeRemaining = useMemo(
-    () => timeRemainingLabel(quoteExpiresAtMs),
-    [quoteExpiresAtMs, quoteTick]
-  );
   const isProcessingWithdrawal =
     withdrawalStatus === 'BURN_SUBMITTED' || withdrawalStatus === 'FORWARDING_PENDING';
   const isQuoteLocked = lockedQuote !== null || isProcessingWithdrawal || sending;
+  const {
+    quote,
+    quoteError,
+    quoteLoading,
+    feeEstimateMinor,
+    quoteRequestAmount,
+    quoteExpired,
+    quoteTimeRemaining,
+    refreshQuote,
+    clearQuoteState,
+    resetQuoteState,
+  } = useWithdrawalQuote({
+    destination,
+    amountMode,
+    parsedInputAmount,
+    activeWalletAddress,
+    isQuoteLocked,
+    sending,
+    step,
+    getAuthToken,
+    debugEnabled: WITHDRAW_DEBUG_ENABLED,
+    pushDebug,
+  });
   const selectedFeeEstimateMinor = useMemo(() => {
     if (destination === 'base') return 0n;
     const estimate = networkFeeEstimates[destination];
@@ -699,104 +653,33 @@ export function WalletPanel() {
     effectiveParsedInputAmount > 0n &&
     derivedReceiveMinor !== null &&
     derivedReceiveMinor < minReceiveMinor;
-  useEffect(() => {
-    if (!quote || !quoteExpiresAtMs || !activeWalletAddress) return;
-    if (sending || isQuoteLocked) return;
-
-    const delay = quoteExpiresAtMs - Date.now() + 250;
-    if (delay <= 0) {
-      if (!quoteLoading) {
-        setQuoteRefreshNonce((value) => value + 1);
-      }
-      return;
-    }
-
-    const timerId = window.setTimeout(() => {
-      if (!sending) {
-        setQuoteRefreshNonce((value) => value + 1);
-      }
-    }, delay);
-
-    return () => window.clearTimeout(timerId);
-  }, [
-    quote,
-    quoteExpiresAtMs,
-    activeWalletAddress,
-    sending,
-    isQuoteLocked,
-    quoteLoading,
-    destination,
-    amountMode,
-    parsedInputAmount,
-  ]);
 
   useEffect(() => {
-    if (!quoteExpiresAtMs || isQuoteLocked) return;
-    setQuoteTick(Date.now());
-    const timerId = window.setInterval(() => {
-      setQuoteTick(Date.now());
-    }, 1000);
-    return () => window.clearInterval(timerId);
-  }, [quoteExpiresAtMs, isQuoteLocked]);
-
-  useEffect(() => {
-    if (destination === 'base') return;
-    if (step !== 4) return;
-    if (sending || isQuoteLocked || quoteLoading) return;
-    if (quote) return;
-    if (!activeWalletAddress || !quoteRequestAmount || quoteRequestAmount <= 0n) return;
-    const timerId = window.setTimeout(() => {
-      setQuoteRefreshNonce((value) => value + 1);
-    }, 1200);
-    return () => window.clearTimeout(timerId);
-  }, [
-    activeWalletAddress,
-    destination,
-    isQuoteLocked,
-    quote,
-    quoteLoading,
-    quoteRequestAmount,
-    sending,
-    step,
-  ]);
-
-  useEffect(() => {
-    if (destination === 'base') return;
-    if (step !== 4) return;
-    if (sending || isQuoteLocked || quoteLoading) return;
-    if (!quote || !quoteExpired) return;
-    const timerId = window.setTimeout(() => {
-      setQuoteRefreshNonce((value) => value + 1);
-    }, 900);
-    return () => window.clearTimeout(timerId);
-  }, [destination, isQuoteLocked, quote, quoteExpired, quoteLoading, sending, step]);
-
-  const publicClient = useMemo(() => {
-    return createPublicClient({
-      chain: config.sourceChain,
-      transport: http(),
+    if (!WITHDRAW_DEBUG_ENABLED || !quote) return;
+    pushDebug('quote:normalized', 'Quote stored', {
+      quote_id: quote.quote_id,
+      dest_chain: quote.dest_chain,
+      transfer_amount_usdc_minor: quote.transfer_amount_usdc_minor,
+      max_fee_usdc_minor: quote.max_fee_usdc_minor,
+      total_burn_usdc_minor: quote.total_burn_usdc_minor,
+      fee_protocol_usdc_minor: quote.fee_protocol_usdc_minor,
+      fee_forward_usdc_minor: quote.fee_forward_usdc_minor,
+      expires_at: quote.expires_at,
+      finality_threshold: quote.finality_threshold,
+      forward_fee_level: quote.forward_fee_level,
     });
-  }, [config.sourceChain]);
+  }, [quote, pushDebug]);
+
+  useEffect(() => {
+    if (!WITHDRAW_DEBUG_ENABLED || !quoteError) return;
+    pushDebug('quote:error', 'Quote error', { message: quoteError });
+  }, [quoteError, pushDebug]);
 
   const baseExplorerBase = useMemo(() => {
     return config.sourceChain.id === 84532
       ? 'https://sepolia.basescan.org/tx/'
       : 'https://basescan.org/tx/';
   }, [config.sourceChain.id]);
-
-  const getAuthToken = useCallback(async () => {
-    let freshToken: string | null = null;
-    try {
-      freshToken = await getIdentityToken();
-    } catch {
-      freshToken = null;
-    }
-    const token = freshToken ?? identityToken;
-    if (!token) {
-      throw new Error('Missing identity token. Please re-login.');
-    }
-    return token;
-  }, [identityToken]);
 
   const handlePasteAddress = async () => {
     try {
@@ -809,58 +692,6 @@ export function WalletPanel() {
       setFormError('Failed to read clipboard.');
     }
   };
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const fetchBalance = async () => {
-      if (!activeWalletAddress || !config.usdcAddress) {
-        setBalance(null);
-        setBalanceError(null);
-        return;
-      }
-
-      setBalanceLoading(true);
-      setBalanceError(null);
-
-      try {
-        const result = await publicClient.readContract({
-          address: config.usdcAddress as `0x${string}`,
-          abi: erc20Abi,
-          functionName: 'balanceOf',
-          args: [activeWalletAddress as `0x${string}`],
-        });
-
-        if (!cancelled) {
-          setBalance(formatUnits(result, 6));
-          setBalanceMinor(result);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          const message = error instanceof Error ? error.message : 'Failed to load balance';
-          setBalanceError(message);
-        }
-      } finally {
-        if (!cancelled) {
-          setBalanceLoading(false);
-        }
-      }
-    };
-
-    fetchBalance();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeWalletAddress, config.usdcAddress, publicClient, balanceRefreshNonce]);
-
-  useEffect(() => {
-    if (!activeWalletAddress || !config.usdcAddress) return;
-    const timerId = window.setInterval(() => {
-      setBalanceRefreshNonce((value) => value + 1);
-    }, 20_000);
-    return () => window.clearInterval(timerId);
-  }, [activeWalletAddress, config.usdcAddress]);
 
   useEffect(() => {
     if (!destinationChains.find((item) => item.key === destination)) {
@@ -882,294 +713,6 @@ export function WalletPanel() {
   useEffect(() => {
     setFormError(null);
   }, [step]);
-
-  useEffect(() => {
-    if (!withdrawOpen || step !== 1) return;
-    const hasAllEstimates = destinationChains.every(
-      (option) => networkFeeEstimates[option.key] !== undefined
-    );
-    if (hasAllEstimates) return;
-    if (networkFeeFetchInFlightRef.current) return;
-
-    let cancelled = false;
-    const requestId = ++networkFeeRequestId.current;
-    networkFeeFetchInFlightRef.current = true;
-    if (networkFeeRetryTimerRef.current) {
-      window.clearTimeout(networkFeeRetryTimerRef.current);
-      networkFeeRetryTimerRef.current = null;
-    }
-
-    const loadEstimates = async () => {
-      setNetworkFeeLoading(true);
-      if (WITHDRAW_DEBUG_ENABLED) {
-        pushDebug('estimate:request', 'Fetching network fee estimates', {
-          destinations: destinationChains.map((option) => option.key),
-        });
-      }
-      try {
-        const token = await withTimeout(getAuthToken(), 8_000, 'Auth token request');
-        const results = await Promise.allSettled(
-          destinationChains.map(async (option) => {
-            if (option.key === 'base') {
-              return [option.key, 0] as const;
-            }
-            const response = await withTimeout(
-              getWithdrawalQuote(token, {
-                dest_chain: option.key,
-                transfer_amount_usdc_minor: 1_000_000,
-              }),
-              15_000,
-              `Fee quote ${option.key}`
-            );
-            return [option.key, response.max_fee_usdc_minor] as const;
-          })
-        );
-        if (cancelled || networkFeeRequestId.current !== requestId) return;
-        const estimateMap: Partial<Record<DestinationChain, number>> = {};
-        const failedChains: string[] = [];
-        const failedReasons: Record<string, string> = {};
-        results.forEach((result, index) => {
-          const optionKey = destinationChains[index]?.key;
-          if (!optionKey) return;
-          if (result.status === 'fulfilled') {
-            const [key, fee] = result.value;
-            estimateMap[key] = fee;
-            return;
-          }
-          failedChains.push(optionKey);
-          failedReasons[optionKey] =
-            result.reason instanceof Error ? result.reason.message : 'Unknown error';
-        });
-        setNetworkFeeEstimates((current) => ({
-          ...current,
-          ...estimateMap,
-        }));
-        if (WITHDRAW_DEBUG_ENABLED) {
-          pushDebug('estimate:response', 'Network fee estimates received', {
-            estimates: estimateMap,
-            failed_chains: failedChains,
-            failed_reasons: failedReasons,
-          });
-        }
-        if (failedChains.length > 0) {
-          networkFeeRetryTimerRef.current = window.setTimeout(() => {
-            setNetworkFeeRetryNonce((value) => value + 1);
-          }, 3_000);
-        }
-      } catch (error) {
-        if (!cancelled && networkFeeRequestId.current === requestId) {
-          networkFeeRetryTimerRef.current = window.setTimeout(() => {
-            setNetworkFeeRetryNonce((value) => value + 1);
-          }, 3_000);
-          if (WITHDRAW_DEBUG_ENABLED) {
-            const message =
-              error instanceof Error ? error.message : 'Failed to fetch network fee estimates';
-            pushDebug('estimate:error', 'Failed to fetch network fee estimates', { message });
-          }
-        }
-      } finally {
-        if (networkFeeRequestId.current === requestId) {
-          networkFeeFetchInFlightRef.current = false;
-          setNetworkFeeLoading(false);
-        }
-      }
-    };
-
-    void loadEstimates();
-
-    return () => {
-      cancelled = true;
-      if (networkFeeRequestId.current === requestId) {
-        networkFeeFetchInFlightRef.current = false;
-      }
-    };
-  }, [
-    destinationChains,
-    getAuthToken,
-    networkFeeEstimates,
-    networkFeeRetryNonce,
-    pushDebug,
-    step,
-    withdrawOpen,
-  ]);
-
-  useEffect(() => {
-    return () => {
-      if (networkFeeRetryTimerRef.current) {
-        window.clearTimeout(networkFeeRetryTimerRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (destination === 'base') {
-      if (!parsedInputAmount || !activeWalletAddress) {
-        setQuote(null);
-        setQuoteError(null);
-        setQuoteLoading(false);
-        return;
-      }
-
-      const transferMinor = toNumberSafe(parsedInputAmount);
-      const expiresAt = Math.floor((Date.now() + 60_000) / 1000);
-      setQuote({
-        quote_id: 'local-base',
-        source_chain: 'base',
-        source_domain_id: 6,
-        dest_chain: 'base',
-        dest_domain_id: 6,
-        transfer_amount_usdc_minor: transferMinor,
-        finality_threshold: 1000,
-        forward_fee_level: 'med',
-        fee_protocol_usdc_minor: 0,
-        fee_forward_usdc_minor: 0,
-        max_fee_usdc_minor: 0,
-        total_burn_usdc_minor: transferMinor,
-        expires_at: expiresAt,
-      });
-      if (WITHDRAW_DEBUG_ENABLED) {
-        pushDebug('quote:local', 'Local Base quote', {
-          transfer_amount_usdc_minor: transferMinor,
-          total_burn_usdc_minor: transferMinor,
-          expires_at: expiresAt,
-        });
-      }
-      setFeeEstimateMinor(0n);
-      setQuoteError(null);
-      setQuoteLoading(false);
-      return;
-    }
-
-    if (isQuoteLocked) {
-      return;
-    }
-
-    if (!quoteRequestAmount || !destination || !activeWalletAddress) {
-      setQuote(null);
-      setQuoteError(null);
-      setQuoteLoading(false);
-      return;
-    }
-
-    if (quoteRequestAmount <= 0n) {
-      setQuote(null);
-      setQuoteError('Amount is below fees');
-      setQuoteLoading(false);
-      return;
-    }
-
-    setQuoteLoading(true);
-    setQuoteError(null);
-
-    const requestId = ++quoteRequestId.current;
-    const handler = window.setTimeout(async () => {
-      try {
-        const token = await getAuthToken();
-        if (WITHDRAW_DEBUG_ENABLED) {
-          pushDebug('quote:request', 'Requesting quote', {
-            dest_chain: destination,
-            amount_mode: amountMode,
-            parsed_input_minor: parsedInputAmount?.toString() ?? null,
-            fee_estimate_minor: feeEstimateMinor.toString(),
-            quote_request_amount_minor: quoteRequestAmount?.toString() ?? null,
-          });
-        }
-        const response = await getWithdrawalQuote(token, {
-          dest_chain: destination,
-          transfer_amount_usdc_minor: toNumberSafe(quoteRequestAmount),
-        });
-        if (quoteRequestId.current !== requestId) return;
-        setQuote(response);
-        setFeeEstimateMinor(BigInt(response.max_fee_usdc_minor));
-        setQuoteError(null);
-        if (WITHDRAW_DEBUG_ENABLED) {
-          pushDebug('quote:response', 'Quote response', {
-            quote_id: response.quote_id,
-            transfer_amount_usdc_minor: response.transfer_amount_usdc_minor,
-            max_fee_usdc_minor: response.max_fee_usdc_minor,
-            total_burn_usdc_minor: response.total_burn_usdc_minor,
-            expires_at: response.expires_at,
-          });
-        }
-      } catch (error) {
-        if (quoteRequestId.current !== requestId) return;
-        const message = error instanceof Error ? error.message : 'Failed to fetch quote';
-        setQuote(null);
-        setQuoteError(message);
-        if (isQuoteExpiredError(message)) {
-          window.setTimeout(() => {
-            setQuoteRefreshNonce((value) => value + 1);
-          }, 900);
-        }
-        if (WITHDRAW_DEBUG_ENABLED) {
-          pushDebug('quote:error', 'Quote request failed', { message });
-        }
-      } finally {
-        if (quoteRequestId.current === requestId) {
-          setQuoteLoading(false);
-        }
-      }
-    }, 450);
-
-    return () => window.clearTimeout(handler);
-  }, [
-    activeWalletAddress,
-    destination,
-    getAuthToken,
-    amountMode,
-    feeEstimateMinor,
-    parsedInputAmount,
-    quoteRequestAmount,
-    quoteRefreshNonce,
-    isQuoteLocked,
-    pushDebug,
-  ]);
-
-  useEffect(() => {
-    if (!withdrawalId || forwardTxHash) return;
-
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const token = await getAuthToken();
-        const status = await getWithdrawalStatus(token, withdrawalId);
-        if (cancelled) return;
-        if (WITHDRAW_DEBUG_ENABLED) {
-          const shouldLog =
-            status.status !== lastStatusRef.current ||
-            status.forward_tx_hash !== lastForwardHashRef.current ||
-            !!status.failure_reason;
-          if (shouldLog) {
-            pushDebug('status:poll', 'Withdrawal status response', {
-              withdrawal_id: withdrawalId,
-              status: status.status,
-              burn_tx_hash: status.burn_tx_hash,
-              forward_tx_hash: status.forward_tx_hash,
-              failure_reason: status.failure_reason ?? null,
-            });
-          }
-        }
-        setWithdrawalStatus(status.status);
-        if (status.burn_tx_hash) setBurnTxHash(status.burn_tx_hash);
-        if (status.forward_tx_hash) setForwardTxHash(status.forward_tx_hash);
-        if (status.failure_reason) setFormError(status.failure_reason);
-      } catch (error) {
-        if (cancelled) return;
-        const message = error instanceof Error ? error.message : 'Failed to refresh status';
-        setFormError(message);
-        if (WITHDRAW_DEBUG_ENABLED) {
-          pushDebug('status:error', 'Failed to refresh withdrawal status', { message });
-        }
-      }
-    };
-
-    poll();
-    const timerId = window.setInterval(poll, 12_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timerId);
-    };
-  }, [getAuthToken, withdrawalId, forwardTxHash, pushDebug]);
 
   const formattedBalance = useMemo(() => {
     if (!balance) return null;
@@ -1207,7 +750,8 @@ export function WalletPanel() {
     // Before quote arrives, use fee estimate so balance checks are immediate.
     return parsedInputAmount + availabilityFeeMinor;
   }, [amountMode, availabilityFeeMinor, parsedInputAmount, quote]);
-  const shouldValidateBalance = !isQuoteLocked && !isProcessingWithdrawal && !sending;
+  const shouldValidateBalance =
+    !isQuoteLocked && !isProcessingWithdrawal && !sending && !balanceLoading;
   const shouldPersistFormError = useMemo(() => {
     if (!formError) return false;
     if (!withdrawalId) return false;
@@ -1226,6 +770,11 @@ export function WalletPanel() {
     balanceMinor < requiredPayMinor;
 
   useEffect(() => {
+    if (!withdrawOpen || step !== 4) return;
+    refreshBalance();
+  }, [refreshBalance, step, withdrawOpen]);
+
+  useEffect(() => {
     if (!formError || shouldPersistFormError) return;
     const timerId = window.setTimeout(() => {
       setFormError((current) => (current === formError ? null : current));
@@ -1237,17 +786,8 @@ export function WalletPanel() {
     setFormError(null);
     setAmountInput('');
     setDestination('base');
-    setQuote(null);
-    setQuoteError(null);
-    setQuoteLoading(false);
-    setFeeEstimateMinor(0n);
-    setNetworkFeeLoading(false);
-    setNetworkFeeRetryNonce(0);
-    networkFeeFetchInFlightRef.current = false;
-    if (networkFeeRetryTimerRef.current) {
-      window.clearTimeout(networkFeeRetryTimerRef.current);
-      networkFeeRetryTimerRef.current = null;
-    }
+    resetQuoteState();
+    resetNetworkFeeRuntimeState();
     setLockedQuote(null);
     setLockedAmountInput(null);
     setLockedAmountMode(null);
@@ -1267,25 +807,13 @@ export function WalletPanel() {
   };
 
   const resetFlow = () => {
-    setWithdrawalId(null);
-    setWithdrawalStatus(null);
-    setBurnTxHash(null);
-    setForwardTxHash(null);
+    resetWithdrawalTracking();
     setFormError(null);
     setSending(false);
     setAmountInput('');
     setDestination('base');
-    setQuote(null);
-    setQuoteError(null);
-    setQuoteLoading(false);
-    setFeeEstimateMinor(0n);
-    setNetworkFeeLoading(false);
-    setNetworkFeeRetryNonce(0);
-    networkFeeFetchInFlightRef.current = false;
-    if (networkFeeRetryTimerRef.current) {
-      window.clearTimeout(networkFeeRetryTimerRef.current);
-      networkFeeRetryTimerRef.current = null;
-    }
+    resetQuoteState();
+    resetNetworkFeeRuntimeState();
     setLockedQuote(null);
     setLockedAmountInput(null);
     setLockedAmountMode(null);
@@ -1421,34 +949,9 @@ export function WalletPanel() {
         return;
       }
 
-      const token = await getAuthToken();
-      if (WITHDRAW_DEBUG_ENABLED) {
-        pushDebug('api:create', 'Creating withdrawal', {
-          quote_id: quote.quote_id,
-          dest_address: destinationAddress.trim(),
-        });
-      }
-      const createResponse = await createWithdrawal(
-        token,
-        {
-          quote_id: quote.quote_id,
-          dest_address: destinationAddress.trim(),
-        },
-        crypto.randomUUID()
-      );
-
-      createdWithdrawalId = createResponse.withdrawal_id;
       setLockedQuote(quote);
       setLockedAmountInput(amountInput);
       setLockedAmountMode(amountMode);
-      setWithdrawalId(createResponse.withdrawal_id);
-      setWithdrawalStatus(createResponse.status);
-      if (WITHDRAW_DEBUG_ENABLED) {
-        pushDebug('api:create', 'Withdrawal created', {
-          withdrawal_id: createResponse.withdrawal_id,
-          status: createResponse.status,
-        });
-      }
 
       const totalBurn = BigInt(quote.total_burn_usdc_minor);
       const maxFee = BigInt(quote.max_fee_usdc_minor);
@@ -1532,21 +1035,48 @@ export function WalletPanel() {
           data: burnData,
           value: 0n,
           chainId: config.sourceChain.id,
-          },
-          {
-            address: activeWalletAddress as `0x${string}`,
-            sponsor: true,
-            uiOptions: buildTxUiOptions({
-              mode: 'burn',
-              destinationLabel: destinationConfig.label,
-            }),
-          }
+        },
+        {
+          address: activeWalletAddress as `0x${string}`,
+          sponsor: true,
+          uiOptions: buildTxUiOptions({
+            mode: 'burn',
+            destinationLabel: destinationConfig.label,
+          }),
+        }
       );
 
       burnTxHashLocal = burnTx.hash;
       setBurnTxHash(burnTx.hash);
       if (WITHDRAW_DEBUG_ENABLED) {
         pushDebug('onchain:burn', 'Burn tx submitted', { tx_hash: burnTx.hash });
+      }
+
+      const token = await getAuthToken();
+      if (WITHDRAW_DEBUG_ENABLED) {
+        pushDebug('api:create', 'Creating withdrawal after burn confirmation', {
+          quote_id: quote.quote_id,
+          dest_address: destinationAddress.trim(),
+          burn_tx_hash: burnTx.hash,
+        });
+      }
+      const createResponse = await createWithdrawal(
+        token,
+        {
+          quote_id: quote.quote_id,
+          dest_address: destinationAddress.trim(),
+        },
+        crypto.randomUUID()
+      );
+
+      createdWithdrawalId = createResponse.withdrawal_id;
+      setWithdrawalId(createResponse.withdrawal_id);
+      setWithdrawalStatus(createResponse.status);
+      if (WITHDRAW_DEBUG_ENABLED) {
+        pushDebug('api:create', 'Withdrawal created', {
+          withdrawal_id: createResponse.withdrawal_id,
+          status: createResponse.status,
+        });
       }
 
       if (WITHDRAW_DEBUG_ENABLED) {
@@ -1574,9 +1104,8 @@ export function WalletPanel() {
         setLockedQuote(null);
         setLockedAmountInput(null);
         setLockedAmountMode(null);
-        setQuote(null);
-        setQuoteError(null);
-        setQuoteRefreshNonce((value) => value + 1);
+        clearQuoteState();
+        refreshQuote();
         setFormError('Quote expired. Refreshing quote, please confirm again.');
         if (WITHDRAW_DEBUG_ENABLED) {
           pushDebug('quote:recover', 'Quote expired/not found, forcing quote refresh', {
@@ -1584,25 +1113,32 @@ export function WalletPanel() {
           });
         }
       } else {
-        if (createdWithdrawalId && !burnTxHashLocal) {
-          setWithdrawalId(null);
-          setWithdrawalStatus(null);
-          setLockedQuote(null);
-          setLockedAmountInput(null);
-          setLockedAmountMode(null);
-          if (WITHDRAW_DEBUG_ENABLED) {
-            pushDebug('submit:recover', 'Create succeeded but tx was not sent, rolling back local state', {
-              withdrawal_id: createdWithdrawalId,
-            });
-          }
-        } else if (createdWithdrawalId && burnTxHashLocal && !burnSubmittedToBackend) {
+        if (createdWithdrawalId && burnTxHashLocal && !burnSubmittedToBackend) {
           setWithdrawalStatus('BURN_SUBMITTED');
           setBurnTxHash(burnTxHashLocal);
           if (WITHDRAW_DEBUG_ENABLED) {
-            pushDebug('submit:recover', 'Burn tx sent but submit endpoint failed; keeping polling state', {
-              withdrawal_id: createdWithdrawalId,
-              burn_tx_hash: burnTxHashLocal,
-            });
+            pushDebug(
+              'submit:recover',
+              'Burn tx sent but submit endpoint failed; keeping polling state',
+              {
+                withdrawal_id: createdWithdrawalId,
+                burn_tx_hash: burnTxHashLocal,
+              }
+            );
+          }
+        } else if (!createdWithdrawalId && burnTxHashLocal) {
+          setLockedQuote(null);
+          setLockedAmountInput(null);
+          setLockedAmountMode(null);
+          setWithdrawalStatus('FAILED');
+          if (WITHDRAW_DEBUG_ENABLED) {
+            pushDebug(
+              'submit:recover',
+              'Burn tx sent but create endpoint failed; no server record',
+              {
+                burn_tx_hash: burnTxHashLocal,
+              }
+            );
           }
         } else if (!createdWithdrawalId) {
           setLockedQuote(null);
@@ -1624,8 +1160,6 @@ export function WalletPanel() {
     const amountDisplay = effectiveAmountInput || '0.00';
     const amountDisplayWidth = `${Math.max(amountDisplay.length, 1)}ch`;
     const amountFontSize = getAmountFontSize(amountDisplay);
-    const amountMuted =
-      !amountInput || amountInput === '0' || amountInput === '0.' || amountInput === '0.0';
     const displayQuote = lockedQuote ?? quote;
     const displayMode = lockedAmountMode ?? amountMode;
     const destinationAddressTrimmed = destinationAddress.trim();
@@ -1633,6 +1167,24 @@ export function WalletPanel() {
       destinationAddressTrimmed.length > 0 && isAddress(destinationAddressTrimmed);
     const hasDestinationAddressError =
       destinationAddressTrimmed.length > 0 && !isDestinationAddressValid;
+    const reviewConfirmDisabled =
+      sending ||
+      isProcessingWithdrawal ||
+      !activeWalletAddress ||
+      !parsedInputAmount ||
+      !destinationConfig ||
+      !isDestinationAddressValid ||
+      quoteLoading ||
+      !quote ||
+      quoteExpired ||
+      insufficientBalance ||
+      belowMinReceive ||
+      config.errors.length > 0;
+    const reviewConfirmLabel = sending
+      ? 'Submitting...'
+      : isProcessingWithdrawal
+        ? 'Processing...'
+        : 'Confirm';
     return (
       <div className="withdraw-flow fixed inset-0 z-50 bg-[#0a0a0a]">
         <div className="relative mx-auto flex h-full w-full max-w-md flex-col px-4 pt-5 pb-8">
@@ -1683,463 +1235,81 @@ export function WalletPanel() {
             </div>
 
             {step === 1 && (
-              <div className="flex flex-1 flex-col justify-between pb-6 pt-6 animate-slide-in">
-                <div className="space-y-3">
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-gray-500">
-                    Choose network
-                  </p>
-                  <div className="space-y-2">
-                    {destinationChains.map((option) => {
-                      const feeEstimate = networkFeeEstimates[option.key];
-                      const feeAffordable = networkAvailability[option.key] !== false;
-                      const minRequiredMinor =
-                        option.key === 'base'
-                          ? MIN_WITHDRAW_RECEIVE_MINOR
-                          : feeEstimate !== undefined
-                            ? feeEstimate + MIN_WITHDRAW_RECEIVE_MINOR
-                            : null;
-                      const feeLabel =
-                        option.key === 'base'
-                          ? feeAffordable
-                            ? 'No bridge fee'
-                            : 'Insufficient balance for minimum transfer (1.00 USDC)'
-                          : !feeAffordable
-                            ? `Insufficient balance for minimum transfer${
-                                minRequiredMinor !== null
-                                  ? ` (≈ ${formatUsdc(minRequiredMinor)} USDC required)`
-                                  : ''
-                              }`
-                            : feeEstimate !== undefined
-                            ? `≈ ${formatUsdc(feeEstimate)} USDC fee`
-                            : networkFeeLoading
-                              ? 'Loading fee…'
-                              : 'Fee unavailable';
-
-                      return (
-                        <button
-                          key={option.key}
-                          type="button"
-                          onClick={() => setDestination(option.key)}
-                          disabled={!feeAffordable}
-                          className={`flex w-full items-start justify-between rounded-2xl border px-4 py-3 text-left text-sm transition ${
-                            destination === option.key
-                              ? 'border-white/40 bg-white/10 text-white'
-                              : 'border-white/10 bg-[#111111] text-gray-300 hover:bg-white/5'
-                          } ${!feeAffordable ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          <div className="flex flex-col gap-1">
-                            <span className="inline-flex items-center gap-2">
-                              <NetworkIcon chainName={option.label} size={18} />
-                              <span>{option.label}</span>
-                            </span>
-                            <span
-                              className={`text-[11px] ${
-                                !feeAffordable ? 'text-[#ff6b7a]' : 'text-gray-500'
-                              }`}
-                            >
-                              {feeLabel}
-                            </span>
-                          </div>
-                          {destination === option.key ? <span>✓</span> : null}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setStep(2)}
-                  disabled={!destinationConfig || networkAvailability[destination] === false}
-                  className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
-                >
-                  Continue
-                </button>
-              </div>
+              <WithdrawStepNetwork
+                destinationChains={destinationChains}
+                destination={destination}
+                networkFeeEstimates={networkFeeEstimates}
+                networkAvailability={networkAvailability}
+                networkFeeLoading={networkFeeLoading}
+                onSelectDestination={setDestination}
+                onContinue={() => setStep(2)}
+                continueDisabled={!destinationConfig || networkAvailability[destination] === false}
+                NetworkIcon={NetworkIcon}
+              />
             )}
 
             {step === 2 && (
-              <div className="flex flex-1 flex-col justify-between pb-6 pt-8 animate-slide-in">
-                <div className="flex flex-1 flex-col items-center justify-center space-y-5 text-center">
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-gray-500">
-                    Enter amount to receive
-                  </p>
-
-                  <div className="flex h-[3.6rem] items-center justify-center">
-                    <div className="inline-flex items-baseline">
-                      <input
-                        type="text"
-                        inputMode="none"
-                        readOnly
-                        value={amountDisplay}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Backspace') {
-                            event.preventDefault();
-                            handleAmountBackspace();
-                            return;
-                          }
-                          if (event.key === '.') {
-                            event.preventDefault();
-                            appendAmountChar('.');
-                            return;
-                          }
-                          if (/^\\d$/.test(event.key)) {
-                            event.preventDefault();
-                            appendAmountChar(event.key);
-                          }
-                        }}
-                        aria-label="USDC amount"
-                        style={{
-                          width: amountDisplayWidth,
-                          marginRight: '0.2em',
-                          fontSize: amountFontSize,
-                          lineHeight: '1.05',
-                        }}
-                        className={`bg-transparent text-center font-semibold tracking-tight focus:outline-none ${
-                          insufficientBalance
-                            ? 'text-[#ff6b7a]'
-                            : amountInput.trim()
-                              ? 'text-white'
-                              : 'text-gray-500'
-                        }`}
-                      />
-                      <span
-                        style={{ fontSize: amountFontSize, lineHeight: '1.05' }}
-                        className={`font-semibold ${
-                          insufficientBalance ? 'text-[#ff6b7a]' : 'text-gray-500'
-                        }`}
-                      >
-                        USDC
-                      </span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-500">
-                    {formattedMaxReceivable ?? '0.00'} USDC available
-                  </p>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="grid grid-cols-4 gap-2">
-                    {[25, 50, 75].map((pct) => (
-                      <button
-                        key={pct}
-                        type="button"
-                        onClick={() => {
-                          if (!balanceMinor) return;
-                          const feeBasis =
-                            amountMode === 'receive' && quote
-                              ? BigInt(quote.max_fee_usdc_minor)
-                              : selectedFeeEstimateMinor;
-                          const available =
-                            amountMode === 'receive'
-                              ? balanceMinor > feeBasis
-                                ? balanceMinor - feeBasis
-                                : 0n
-                              : balanceMinor;
-                          const value = (available * BigInt(pct)) / 100n;
-                          handleAmountChange(formatUnits(value, 6));
-                        }}
-                        className="rounded-2xl border border-white/10 bg-white/5 py-2 text-sm text-white hover:bg-white/15"
-                      >
-                        {pct}%
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!balanceMinor) return;
-                        const feeBasis =
-                          amountMode === 'receive' && quote
-                            ? BigInt(quote.max_fee_usdc_minor)
-                            : selectedFeeEstimateMinor;
-                        const available =
-                          amountMode === 'receive'
-                            ? balanceMinor > feeBasis
-                              ? balanceMinor - feeBasis
-                              : 0n
-                            : balanceMinor;
-                        handleAmountChange(formatUnits(available, 6));
-                      }}
-                      className="rounded-2xl border border-white/10 bg-white/5 py-2 text-sm text-white hover:bg-white/15"
-                    >
-                      Max
-                    </button>
-                  </div>
-
-                  {insufficientBalance ? (
-                    <div className="w-full rounded-2xl bg-[#ff6b7a] py-3 text-center text-sm font-semibold text-black">
-                      Insufficient funds
-                    </div>
-                  ) : belowMinReceive ? (
-                    <div className="w-full rounded-2xl bg-[#ff6b7a] py-3 text-center text-sm font-semibold text-black">
-                      {amountMode === 'pay' && minPayMinor !== null
-                        ? `Minimum amount is ${formatUsdc(minPayMinor)} USDC`
-                        : 'Minimum amount is 1.00 USDC'}
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setStep(4)}
-                      disabled={!parsedInputAmount || parsedInputAmount <= 0n || belowMinReceive}
-                      className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
-                    >
-                      Continue
-                    </button>
-                  )}
-
-                  <div className="grid grid-cols-3 gap-3">
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((value) => (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => appendAmountChar(String(value))}
-                        className="rounded-2xl bg-[#121212] py-4 text-2xl text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-                      >
-                        {value}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => appendAmountChar('.')}
-                      className="no-shimmer rounded-2xl py-4 text-2xl text-white"
-                    >
-                      .
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => appendAmountChar('0')}
-                      className="rounded-2xl bg-[#121212] py-4 text-2xl text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-                    >
-                      0
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleAmountBackspace}
-                      className="no-shimmer inline-flex items-center justify-center rounded-2xl py-4 text-white"
-                      aria-label="Delete"
-                    >
-                      <BackspaceIcon />
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <WithdrawStepAmount
+                amountDisplay={amountDisplay}
+                amountDisplayWidth={amountDisplayWidth}
+                amountFontSize={amountFontSize}
+                amountInput={amountInput}
+                formattedMaxReceivable={formattedMaxReceivable}
+                insufficientBalance={insufficientBalance}
+                belowMinReceive={belowMinReceive}
+                minPayMinor={minPayMinor}
+                amountMode={amountMode}
+                parsedInputAmount={parsedInputAmount}
+                balanceMinor={balanceMinor}
+                quote={quote}
+                selectedFeeEstimateMinor={selectedFeeEstimateMinor}
+                onAmountChange={handleAmountChange}
+                appendAmountChar={appendAmountChar}
+                onAmountBackspace={handleAmountBackspace}
+                onContinue={() => setStep(4)}
+                BackspaceIcon={BackspaceIcon}
+              />
             )}
 
             {step === 4 && (
-              <div className="flex flex-1 flex-col justify-between pb-6 pt-6 animate-slide-in">
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-[11px] uppercase tracking-[0.2em] text-gray-500">
-                      Destination address
-                    </label>
-                    <div className="mt-3 flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={destinationAddress}
-                        onChange={(event) => setDestinationAddress(event.target.value)}
-                        placeholder="Enter address to send to"
-                        className={`w-full rounded-2xl bg-[#111111] px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 ${
-                          hasDestinationAddressError
-                            ? 'border border-red-500/70 focus:ring-red-500/40'
-                            : 'border border-white/10 focus:ring-white/20'
-                        }`}
-                      />
-                      <button
-                        type="button"
-                        onClick={handlePasteAddress}
-                        className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-xs text-white transition hover:bg-white/10"
-                      >
-                        Paste
-                      </button>
-                    </div>
-                    {hasDestinationAddressError && (
-                      <p className="mt-2 text-[11px] text-red-400">Invalid address</p>
-                    )}
-                    {isDestinationAddressValid && (
-                      <p className="mt-2 text-[11px] text-emerald-300">Address looks valid</p>
-                    )}
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-[#111111] p-4 space-y-3">
-                    <div className="text-center">
-                      <p className="text-2xl font-semibold text-white">
-                        {(lockedAmountMode ?? amountMode) === 'pay'
-                          ? derivedPayMinor !== null
-                            ? formatUsdc(derivedPayMinor)
-                            : '0.00'
-                          : lockedQuote
-                            ? formatUsdc(lockedQuote.transfer_amount_usdc_minor)
-                            : derivedReceiveMinor !== null
-                              ? formatUsdc(derivedReceiveMinor)
-                              : '0.00'}{' '}
-                        USDC
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {isQuoteLocked ? 'Locked' : quoteTimeRemaining}
-                      </p>
-                    </div>
-                    <div className="space-y-2 text-sm text-gray-300">
-                      <div className="flex items-center justify-between">
-                        <span>Network</span>
-                        <span className="text-white">
-                          {destinationConfig?.label ?? destination}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span>To</span>
-                        <span className={hasDestinationAddressError ? 'text-red-400' : 'text-white'}>
-                          {destinationAddressTrimmed
-                            ? isDestinationAddressValid
-                              ? truncateAddress(destinationAddressTrimmed)
-                              : destinationAddressTrimmed
-                            : '—'}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="border-t border-white/10 pt-3 space-y-1.5 text-xs text-gray-300">
-                      {quoteLoading && !displayQuote ? (
-                        <p>Fetching quote...</p>
-                      ) : quoteError ? (
-                        <p className="text-red-400">{quoteError}</p>
-                      ) : displayQuote ? (
-                        <>
-                          <p>
-                            You pay:{' '}
-                            <span className="text-white">
-                              {displayMode === 'pay'
-                                ? derivedPayMinor !== null
-                                  ? formatUsdc(derivedPayMinor)
-                                  : '0.00'
-                                : formatUsdc(displayQuote.total_burn_usdc_minor)}{' '}
-                              USDC
-                            </span>
-                          </p>
-                          <p>
-                            You receive:{' '}
-                            <span className="text-white">
-                              {displayMode === 'receive'
-                                ? formatUsdc(displayQuote.transfer_amount_usdc_minor)
-                                : derivedReceiveMinor !== null
-                                  ? formatUsdc(derivedReceiveMinor)
-                                  : '0.00'}{' '}
-                              USDC
-                            </span>
-                          </p>
-                          <p>
-                            Fees:{' '}
-                            <span className="text-white">
-                              {formatUsdc(displayQuote.max_fee_usdc_minor)} USDC
-                            </span>
-                          </p>
-                        </>
-                      ) : (
-                        <p>Enter amount to get a quote.</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {quote && quoteExpired && !isQuoteLocked && !sending && (
-                    <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-xs text-yellow-300">
-                      Quote expired. Refreshing automatically…
-                    </div>
-                  )}
-
-                {formError && <p className="text-xs text-red-400">{formError}</p>}
-                {insufficientBalance && (
-                  <p className="text-xs text-yellow-300">
-                    Insufficient USDC balance for this amount.
-                  </p>
-                )}
-                {belowMinReceive && (
-                  <p className="text-xs text-yellow-300">
-                    {amountMode === 'pay'
-                      ? `Minimum amount is ${formatUsdc(minPayMinor)} USDC`
-                      : 'Minimum amount is 1.00 USDC'}
-                  </p>
-                )}
-
-                  {(withdrawalId || burnTxHash) && (
-                    <div className="rounded-2xl border border-white/10 bg-[#111111] p-3 text-xs text-gray-300 space-y-1">
-                      <p>
-                        Withdrawal status:{' '}
-                        <span className="text-white">{withdrawalStatus ?? 'CREATED'}</span>
-                      </p>
-                      {burnTxHash && (
-                        <p className="break-all">
-                          {destination === 'base' ? 'Transfer tx:' : 'Burn tx:'}{' '}
-                          <a
-                            className="text-purple-300 hover:underline"
-                            href={`${baseExplorerBase}${burnTxHash}`}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {burnTxHash}
-                          </a>
-                        </p>
-                      )}
-                      {forwardTxHash && destinationConfig && (
-                        <p className="break-all">
-                          Mint tx:{' '}
-                          <a
-                            className="text-purple-300 hover:underline"
-                            href={`${destinationConfig.explorerTxBase}${forwardTxHash}`}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {forwardTxHash}
-                          </a>
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setStep(2)}
-                      disabled={sending || isProcessingWithdrawal}
-                      className="w-full rounded-2xl border border-white/15 bg-white/5 py-3 text-sm text-white transition hover:bg-white/10 disabled:opacity-50"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={
-                        sending ||
-                        isProcessingWithdrawal ||
-                        !activeWalletAddress ||
-                        !parsedInputAmount ||
-                        !destinationConfig ||
-                        !isDestinationAddressValid ||
-                        quoteLoading ||
-                        !quote ||
-                        quoteExpired ||
-                        insufficientBalance ||
-                        belowMinReceive ||
-                        config.errors.length > 0
-                      }
-                      className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
-                    >
-                      {sending
-                        ? 'Submitting...'
-                        : isProcessingWithdrawal
-                          ? 'Processing...'
-                          : 'Confirm'}
-                    </button>
-                  </div>
-
-                  {withdrawalId && forwardTxHash && (
-                    <button
-                      type="button"
-                      onClick={resetFlow}
-                      className="w-full rounded-2xl border border-white/15 bg-white/5 py-3 text-sm text-gray-100 transition hover:bg-white/10"
-                    >
-                      Start new withdrawal
-                    </button>
-                  )}
-                </div>
-              </div>
+              <WithdrawStepReview
+                destinationAddress={destinationAddress}
+                onDestinationAddressChange={setDestinationAddress}
+                onPasteAddress={handlePasteAddress}
+                hasDestinationAddressError={hasDestinationAddressError}
+                isDestinationAddressValid={isDestinationAddressValid}
+                destinationAddressTrimmed={destinationAddressTrimmed}
+                lockedAmountMode={lockedAmountMode}
+                amountMode={amountMode}
+                derivedPayMinor={derivedPayMinor}
+                lockedQuote={lockedQuote}
+                derivedReceiveMinor={derivedReceiveMinor}
+                isQuoteLocked={isQuoteLocked}
+                quoteTimeRemaining={quoteTimeRemaining}
+                destinationConfig={destinationConfig}
+                destination={destination}
+                quoteLoading={quoteLoading}
+                displayQuote={displayQuote}
+                quoteError={quoteError}
+                displayMode={displayMode}
+                quote={quote}
+                quoteExpired={quoteExpired}
+                sending={sending}
+                formError={formError}
+                insufficientBalance={insufficientBalance}
+                belowMinReceive={belowMinReceive}
+                minPayMinor={minPayMinor}
+                withdrawalId={withdrawalId}
+                burnTxHash={burnTxHash}
+                withdrawalStatus={withdrawalStatus}
+                baseExplorerBase={baseExplorerBase}
+                forwardTxHash={forwardTxHash}
+                onCancel={() => setStep(2)}
+                onResetFlow={resetFlow}
+                cancelDisabled={sending || isProcessingWithdrawal}
+                confirmDisabled={reviewConfirmDisabled}
+                confirmLabel={reviewConfirmLabel}
+              />
             )}
 
             {WITHDRAW_DEBUG_ENABLED && showDebug && (
