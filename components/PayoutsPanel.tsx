@@ -260,6 +260,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
                 key={itemId}
                 item={item}
                 amountLabel={formatPillAmount(item)}
+                sourceLabel="Tournament reward"
                 highlighted={isFocused}
                 onDetails={() => setSelectedPayout(item)}
                 canClaim={canClaim}
@@ -312,6 +313,10 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
             <StatusBadge status={selectedPayout.status} />
 
             <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <p className="text-gray-500">Source</p>
+                <p className="text-gray-200">Tournament reward</p>
+              </div>
               <div>
                 <p className="text-gray-500">Chain</p>
                 <p className="text-gray-200">{selectedPayout.chain}</p>

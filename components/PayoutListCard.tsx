@@ -26,6 +26,7 @@ function VerticalDotsIcon() {
 interface PayoutListCardProps {
   item: PayoutPreview;
   amountLabel: string;
+  sourceLabel?: string;
   highlighted?: boolean;
   onDetails?: () => void;
   showStatus?: boolean;
@@ -38,6 +39,7 @@ interface PayoutListCardProps {
 export function PayoutListCard({
   item,
   amountLabel,
+  sourceLabel,
   highlighted = false,
   onDetails,
   showStatus = true,
@@ -48,6 +50,9 @@ export function PayoutListCard({
 }: PayoutListCardProps) {
   const chainLabel = item.chain?.trim() ?? '';
   const showChainLabel = chainLabel.length > 0 && !chainLabel.toLowerCase().includes('base');
+  const secondaryMeta = [sourceLabel?.trim(), showChainLabel ? `${item.chain} Network` : null]
+    .filter(Boolean)
+    .join(' · ');
   const [amountPart, assetPart] = amountLabel.split(' ');
   const isWalletVariant = variant === 'wallet';
 
@@ -55,10 +60,10 @@ export function PayoutListCard({
     <div
       className={`rounded-2xl border transition ${
         highlighted
-          ? 'border-white/30 bg-[#151515]'
+          ? 'border-white/18 bg-[#151515]'
           : isWalletVariant
-            ? 'border-white/12 bg-white/[0.02] hover:border-white/20'
-            : 'border-white/10 bg-black/35 hover:border-white/20'
+            ? 'border-white/8 bg-white/[0.02] hover:border-white/14'
+            : 'border-white/8 bg-black/35 hover:border-white/14'
       }`}
     >
       <div className={`${isWalletVariant ? 'p-4' : 'p-3'} flex items-center justify-between gap-3`}>
@@ -71,9 +76,9 @@ export function PayoutListCard({
             {amountPart}
             {assetPart ? <span className="ml-1 text-gray-300">{assetPart}</span> : null}
           </p>
-          {showChainLabel ? (
-            <p className="truncate text-xs leading-4 text-gray-400 capitalize">
-              {item.chain} Network
+          {secondaryMeta ? (
+            <p className="truncate text-xs leading-4 text-gray-500">
+              {secondaryMeta}
             </p>
           ) : null}
         </div>

@@ -1544,6 +1544,7 @@ export function WalletPanel() {
                       key={key}
                       item={item}
                       amountLabel={formatClaimablePillAmount(item)}
+                      sourceLabel="Tournament reward"
                       showStatus={false}
                       variant="wallet"
                       onDetails={() => setSelectedPayout(item)}
@@ -1589,6 +1590,10 @@ export function WalletPanel() {
             <StatusBadge status={selectedPayout.status} />
 
             <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <p className="text-gray-500">Source</p>
+                <p className="text-gray-200">Tournament reward</p>
+              </div>
               <div>
                 <p className="text-gray-500">Chain</p>
                 <p className="text-gray-200">{selectedPayout.chain}</p>
