@@ -105,7 +105,13 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
   const [selectedPayout, setSelectedPayout] = useState<PayoutPreview | null>(null);
 
   const getAuthToken = useCallback(async () => {
-    const token = identityToken ?? (await getIdentityToken());
+    let freshToken: string | null = null;
+    try {
+      freshToken = await getIdentityToken();
+    } catch {
+      freshToken = null;
+    }
+    const token = freshToken ?? identityToken;
     if (!token) {
       throw new Error('Missing identity token. Please re-login.');
     }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getIdentityToken, useIdentityToken } from '@privy-io/react-auth';
 import { getMyWithdrawals } from '@/lib/api';
 import { getCctpConfig, getDestinationChains } from '@/lib/cctp';
+import { truncateAddress } from '@/lib/format';
 import type { DestinationChain, WithdrawalListItem, WithdrawalStatus } from '@/types/withdrawal';
 import { WithdrawalStatusBadge } from '@/components/WithdrawalStatusBadge';
 
@@ -30,10 +31,6 @@ function truncateHash(value: string): string {
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
 }
 
-function truncateAddress(value: string): string {
-  return `${value.slice(0, 6)}...${value.slice(-4)}`;
-}
-
 export function WithdrawalsPanel() {
   const { identityToken } = useIdentityToken();
   const config = useMemo(() => getCctpConfig(), []);
@@ -47,7 +44,13 @@ export function WithdrawalsPanel() {
   const [activeFilter, setActiveFilter] = useState<'ALL' | WithdrawalStatus>('ALL');
 
   const getAuthToken = useCallback(async () => {
-    const token = identityToken ?? (await getIdentityToken());
+    let freshToken: string | null = null;
+    try {
+      freshToken = await getIdentityToken();
+    } catch {
+      freshToken = null;
+    }
+    const token = freshToken ?? identityToken;
     if (!token) {
       throw new Error('Missing identity token. Please re-login.');
     }

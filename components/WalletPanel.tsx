@@ -24,6 +24,7 @@ import {
   submitBurnTx,
 } from '@/lib/api';
 import { getCctpConfig, getDestinationChains, getDestinationConfig } from '@/lib/cctp';
+import { truncateAddress } from '@/lib/format';
 import type {
   DestinationChain,
   WithdrawalQuoteResponse,
@@ -32,6 +33,15 @@ import type {
 
 const ZERO_BYTES32 = `0x${'0'.repeat(64)}` as `0x${string}`;
 const MAX_UINT256 = (2n ** 256n - 1n) as bigint;
+const WITHDRAW_DEBUG_ENABLED =
+  (process.env.NEXT_PUBLIC_WITHDRAW_DEBUG ?? '').toLowerCase() === 'true';
+
+type WithdrawDebugEvent = {
+  ts: number;
+  stage: string;
+  message: string;
+  data?: Record<string, unknown>;
+};
 
 const TOKEN_MESSENGER_ABI = [
   {
@@ -84,6 +94,22 @@ function timeRemainingLabel(expiresAtMs?: number | null): string {
   return `${minutes}m`;
 }
 
+function safeStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+  return JSON.stringify(
+    value,
+    (_key, val) => {
+      if (typeof val === 'bigint') return val.toString();
+      if (val && typeof val === 'object') {
+        if (seen.has(val as object)) return '[Circular]';
+        seen.add(val as object);
+      }
+      return val;
+    },
+    2
+  );
+}
+
 function getAmountFontSize(displayValue: string): string {
   const length = displayValue.replace('.', '').length || 1;
   const maxSize = 3.2;
@@ -94,6 +120,16 @@ function getAmountFontSize(displayValue: string): string {
 }
 
 const MAX_USDC_MINOR = 1_000_000_000_000_000 - 1; // 1 quadrillion - 1 (minor units)
+
+function isQuoteExpiredError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('quote') &&
+    (normalized.includes('expired') ||
+      normalized.includes('not found') ||
+      normalized.includes('invalid'))
+  );
+}
 
 function UsdcIcon({ size = 16 }: { size?: number }) {
   return (
@@ -109,6 +145,92 @@ function UsdcIcon({ size = 16 }: { size?: number }) {
       <path
         d="M20.5 18.5C20.5 16.5 19 15.5 16 15C14 14.5 13.5 14 13.5 13C13.5 12 14.5 11.5 16 11.5C17.5 11.5 18.5 12 19 13L21 12C20.5 10.5 19 9.5 17 9V7H15V9C12.5 9.5 11 11 11 13C11 15 12.5 16 15.5 16.5C17.5 17 18 17.5 18 18.5C18 19.5 17 20.5 15.5 20.5C14 20.5 12.5 19.5 12 18L10 19C10.5 21 12.5 22.5 15 23V25H17V23C19.5 22.5 21 21 20.5 18.5Z"
         fill="white"
+      />
+    </svg>
+  );
+}
+
+// Backspace icon shape from Lucide (ISC License), embedded as inline SVG.
+function BackspaceIcon({ size = 24 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m17 9-6 6m0-6 6 6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// ArrowLeft and X icon shapes from Lucide (ISC License), embedded as inline SVG.
+function ArrowLeftIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="m12 19-7-7 7-7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M19 12H5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function CloseIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M18 6 6 18"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m6 6 12 12"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );
@@ -224,7 +346,7 @@ function NetworkIcon({ chainName, size = 16 }: { chainName: string; size?: numbe
 }
 
 type AmountMode = 'receive' | 'pay';
-type WithdrawStep = 1 | 2 | 3 | 4;
+type WithdrawStep = 1 | 2 | 4;
 
 export function WalletPanel() {
   const { wallets } = useWallets();
@@ -232,7 +354,7 @@ export function WalletPanel() {
   const { sendTransaction } = useSendTransaction();
   const config = useMemo(() => getCctpConfig(), []);
 
-  const [amountMode, setAmountMode] = useState<AmountMode>('receive');
+  const [amountMode] = useState<AmountMode>('receive');
   const [amountInput, setAmountInput] = useState('');
   const [destination, setDestination] = useState<DestinationChain>('ethereum');
   const [destinationAddress, setDestinationAddress] = useState('');
@@ -263,8 +385,29 @@ export function WalletPanel() {
   const [burnTxHash, setBurnTxHash] = useState<string | null>(null);
   const [forwardTxHash, setForwardTxHash] = useState<string | null>(null);
   const [feeEstimateMinor, setFeeEstimateMinor] = useState<bigint>(0n);
+  const [debugEvents, setDebugEvents] = useState<WithdrawDebugEvent[]>([]);
+  const [showDebug, setShowDebug] = useState(false);
   const quoteRequestId = useRef(0);
   const networkFeeRequestId = useRef(0);
+  const lastStatusRef = useRef<string | null>(null);
+  const lastForwardHashRef = useRef<string | null>(null);
+
+  const pushDebug = useCallback(
+    (stage: string, message: string, data?: Record<string, unknown>) => {
+      if (!WITHDRAW_DEBUG_ENABLED) return;
+      const entry: WithdrawDebugEvent = {
+        ts: Date.now(),
+        stage,
+        message,
+        data,
+      };
+      setDebugEvents((current) => [...current, entry].slice(-200));
+      if (typeof window !== 'undefined') {
+        console.debug('[withdraw]', stage, message, data ?? {});
+      }
+    },
+    []
+  );
 
   const activeWalletAddress = wallets[0]?.address ?? null;
   const destinationChains = useMemo(
@@ -288,6 +431,67 @@ export function WalletPanel() {
     });
     return availability;
   }, [balanceMinor, destinationChains, networkFeeEstimates]);
+  useEffect(() => {
+    if (!withdrawOpen || !WITHDRAW_DEBUG_ENABLED) return;
+    pushDebug('flow', 'Withdrawal flow opened', {
+      env: process.env.NEXT_PUBLIC_CCTP_ENV ?? 'mainnet',
+      source_chain: config.sourceChain.name,
+      source_chain_id: config.sourceChain.id,
+      usdc_address: config.usdcAddress,
+      token_messenger: config.tokenMessengerAddress,
+    });
+  }, [config, destinationChains, pushDebug, withdrawOpen]);
+
+  useEffect(() => {
+    if (!withdrawOpen || !WITHDRAW_DEBUG_ENABLED) return;
+    pushDebug('ui', 'Destination selected', { destination });
+  }, [destination, pushDebug, withdrawOpen]);
+
+  useEffect(() => {
+    if (!WITHDRAW_DEBUG_ENABLED || !quote) return;
+    pushDebug('quote:normalized', 'Quote stored', {
+      quote_id: quote.quote_id,
+      dest_chain: quote.dest_chain,
+      transfer_amount_usdc_minor: quote.transfer_amount_usdc_minor,
+      max_fee_usdc_minor: quote.max_fee_usdc_minor,
+      total_burn_usdc_minor: quote.total_burn_usdc_minor,
+      fee_protocol_usdc_minor: quote.fee_protocol_usdc_minor,
+      fee_forward_usdc_minor: quote.fee_forward_usdc_minor,
+      expires_at: quote.expires_at,
+      finality_threshold: quote.finality_threshold,
+      forward_fee_level: quote.forward_fee_level,
+    });
+  }, [quote, pushDebug]);
+
+  useEffect(() => {
+    if (!WITHDRAW_DEBUG_ENABLED || !quoteError) return;
+    pushDebug('quote:error', 'Quote error', { message: quoteError });
+  }, [quoteError, pushDebug]);
+
+  useEffect(() => {
+    if (!WITHDRAW_DEBUG_ENABLED || !formError) return;
+    pushDebug('form:error', 'Form error', { message: formError });
+  }, [formError, pushDebug]);
+
+  useEffect(() => {
+    if (!WITHDRAW_DEBUG_ENABLED || !withdrawalStatus) return;
+    if (lastStatusRef.current === withdrawalStatus) return;
+    lastStatusRef.current = withdrawalStatus;
+    pushDebug('status', 'Withdrawal status update', {
+      withdrawal_id: withdrawalId,
+      status: withdrawalStatus,
+    });
+  }, [pushDebug, withdrawalId, withdrawalStatus]);
+
+  useEffect(() => {
+    if (!WITHDRAW_DEBUG_ENABLED || !forwardTxHash) return;
+    if (lastForwardHashRef.current === forwardTxHash) return;
+    lastForwardHashRef.current = forwardTxHash;
+    pushDebug('status', 'Forward tx hash received', {
+      withdrawal_id: withdrawalId,
+      forward_tx_hash: forwardTxHash,
+    });
+  }, [forwardTxHash, pushDebug, withdrawalId]);
   const clampAmountInput = useCallback((raw: string) => {
     const cleaned = raw.replace(/[^0-9.]/g, '');
     if (!cleaned) return '';
@@ -366,10 +570,7 @@ export function WalletPanel() {
     [quoteExpiresAtMs, quoteTick]
   );
   const isProcessingWithdrawal =
-    !!withdrawalId &&
-    withdrawalStatus !== 'MINTED' &&
-    withdrawalStatus !== 'FAILED' &&
-    withdrawalStatus !== 'EXPIRED';
+    withdrawalStatus === 'BURN_SUBMITTED' || withdrawalStatus === 'FORWARDING_PENDING';
   const isQuoteLocked = lockedQuote !== null || isProcessingWithdrawal || sending;
   const selectedFeeEstimateMinor = useMemo(() => {
     if (destination === 'base') return 0n;
@@ -408,21 +609,6 @@ export function WalletPanel() {
     effectiveParsedInputAmount > 0n &&
     derivedReceiveMinor !== null &&
     derivedReceiveMinor < minReceiveMinor;
-  const formatMinorForInput = useCallback((minor: number | null) => {
-    if (minor === null || !Number.isFinite(minor)) return '';
-    const normalized = Math.max(0, Math.floor(minor));
-    return formatUnits(BigInt(normalized), 6);
-  }, []);
-  const handleSelectPay = useCallback(() => {
-    const nextValue = formatMinorForInput(derivedPayMinor);
-    handleAmountChange(nextValue);
-    setAmountMode('pay');
-  }, [derivedPayMinor, formatMinorForInput, handleAmountChange]);
-  const handleSelectReceive = useCallback(() => {
-    const nextValue = formatMinorForInput(derivedReceiveMinor);
-    handleAmountChange(nextValue);
-    setAmountMode('receive');
-  }, [derivedReceiveMinor, formatMinorForInput, handleAmountChange]);
   useEffect(() => {
     if (!quote || !quoteExpiresAtMs || !activeWalletAddress) return;
     if (sending || isQuoteLocked) return;
@@ -463,6 +649,38 @@ export function WalletPanel() {
     return () => window.clearInterval(timerId);
   }, [quoteExpiresAtMs, isQuoteLocked]);
 
+  useEffect(() => {
+    if (destination === 'base') return;
+    if (step !== 4) return;
+    if (sending || isQuoteLocked || quoteLoading) return;
+    if (quote) return;
+    if (!activeWalletAddress || !quoteRequestAmount || quoteRequestAmount <= 0n) return;
+    const timerId = window.setTimeout(() => {
+      setQuoteRefreshNonce((value) => value + 1);
+    }, 1200);
+    return () => window.clearTimeout(timerId);
+  }, [
+    activeWalletAddress,
+    destination,
+    isQuoteLocked,
+    quote,
+    quoteLoading,
+    quoteRequestAmount,
+    sending,
+    step,
+  ]);
+
+  useEffect(() => {
+    if (destination === 'base') return;
+    if (step !== 4) return;
+    if (sending || isQuoteLocked || quoteLoading) return;
+    if (!quote || !quoteExpired) return;
+    const timerId = window.setTimeout(() => {
+      setQuoteRefreshNonce((value) => value + 1);
+    }, 900);
+    return () => window.clearTimeout(timerId);
+  }, [destination, isQuoteLocked, quote, quoteExpired, quoteLoading, sending, step]);
+
   const publicClient = useMemo(() => {
     return createPublicClient({
       chain: config.sourceChain,
@@ -477,7 +695,13 @@ export function WalletPanel() {
   }, [config.sourceChain.id]);
 
   const getAuthToken = useCallback(async () => {
-    const token = identityToken ?? (await getIdentityToken());
+    let freshToken: string | null = null;
+    try {
+      freshToken = await getIdentityToken();
+    } catch {
+      freshToken = null;
+    }
+    const token = freshToken ?? identityToken;
     if (!token) {
       throw new Error('Missing identity token. Please re-login.');
     }
@@ -582,6 +806,11 @@ export function WalletPanel() {
 
     const loadEstimates = async () => {
       setNetworkFeeLoading(true);
+      if (WITHDRAW_DEBUG_ENABLED) {
+        pushDebug('estimate:request', 'Fetching network fee estimates', {
+          destinations: destinationChains.map((option) => option.key),
+        });
+      }
       try {
         const token = await getAuthToken();
         const results = await Promise.all(
@@ -602,9 +831,17 @@ export function WalletPanel() {
           estimateMap[key] = fee;
         });
         setNetworkFeeEstimates(estimateMap);
+        if (WITHDRAW_DEBUG_ENABLED) {
+          pushDebug('estimate:response', 'Network fee estimates received', {
+            estimates: estimateMap,
+          });
+        }
       } catch {
         if (!cancelled && networkFeeRequestId.current === requestId) {
           setNetworkFeeEstimates({});
+          if (WITHDRAW_DEBUG_ENABLED) {
+            pushDebug('estimate:error', 'Failed to fetch network fee estimates');
+          }
         }
       } finally {
         if (!cancelled && networkFeeRequestId.current === requestId) {
@@ -618,7 +855,7 @@ export function WalletPanel() {
     return () => {
       cancelled = true;
     };
-  }, [destinationChains, getAuthToken, networkFeeEstimates, step, withdrawOpen]);
+  }, [destinationChains, getAuthToken, networkFeeEstimates, pushDebug, step, withdrawOpen]);
 
   useEffect(() => {
     if (destination === 'base') {
@@ -646,6 +883,13 @@ export function WalletPanel() {
         total_burn_usdc_minor: transferMinor,
         expires_at: expiresAt,
       });
+      if (WITHDRAW_DEBUG_ENABLED) {
+        pushDebug('quote:local', 'Local Base quote', {
+          transfer_amount_usdc_minor: transferMinor,
+          total_burn_usdc_minor: transferMinor,
+          expires_at: expiresAt,
+        });
+      }
       setFeeEstimateMinor(0n);
       setQuoteError(null);
       setQuoteLoading(false);
@@ -677,6 +921,15 @@ export function WalletPanel() {
     const handler = window.setTimeout(async () => {
       try {
         const token = await getAuthToken();
+        if (WITHDRAW_DEBUG_ENABLED) {
+          pushDebug('quote:request', 'Requesting quote', {
+            dest_chain: destination,
+            amount_mode: amountMode,
+            parsed_input_minor: parsedInputAmount?.toString() ?? null,
+            fee_estimate_minor: feeEstimateMinor.toString(),
+            quote_request_amount_minor: quoteRequestAmount?.toString() ?? null,
+          });
+        }
         const response = await getWithdrawalQuote(token, {
           dest_chain: destination,
           transfer_amount_usdc_minor: toNumberSafe(quoteRequestAmount),
@@ -685,11 +938,28 @@ export function WalletPanel() {
         setQuote(response);
         setFeeEstimateMinor(BigInt(response.max_fee_usdc_minor));
         setQuoteError(null);
+        if (WITHDRAW_DEBUG_ENABLED) {
+          pushDebug('quote:response', 'Quote response', {
+            quote_id: response.quote_id,
+            transfer_amount_usdc_minor: response.transfer_amount_usdc_minor,
+            max_fee_usdc_minor: response.max_fee_usdc_minor,
+            total_burn_usdc_minor: response.total_burn_usdc_minor,
+            expires_at: response.expires_at,
+          });
+        }
       } catch (error) {
         if (quoteRequestId.current !== requestId) return;
         const message = error instanceof Error ? error.message : 'Failed to fetch quote';
         setQuote(null);
         setQuoteError(message);
+        if (isQuoteExpiredError(message)) {
+          window.setTimeout(() => {
+            setQuoteRefreshNonce((value) => value + 1);
+          }, 900);
+        }
+        if (WITHDRAW_DEBUG_ENABLED) {
+          pushDebug('quote:error', 'Quote request failed', { message });
+        }
       } finally {
         if (quoteRequestId.current === requestId) {
           setQuoteLoading(false);
@@ -702,10 +972,13 @@ export function WalletPanel() {
     activeWalletAddress,
     destination,
     getAuthToken,
+    amountMode,
+    feeEstimateMinor,
     parsedInputAmount,
     quoteRequestAmount,
     quoteRefreshNonce,
     isQuoteLocked,
+    pushDebug,
   ]);
 
   useEffect(() => {
@@ -717,6 +990,21 @@ export function WalletPanel() {
         const token = await getAuthToken();
         const status = await getWithdrawalStatus(token, withdrawalId);
         if (cancelled) return;
+        if (WITHDRAW_DEBUG_ENABLED) {
+          const shouldLog =
+            status.status !== lastStatusRef.current ||
+            status.forward_tx_hash !== lastForwardHashRef.current ||
+            !!status.failure_reason;
+          if (shouldLog) {
+            pushDebug('status:poll', 'Withdrawal status response', {
+              withdrawal_id: withdrawalId,
+              status: status.status,
+              burn_tx_hash: status.burn_tx_hash,
+              forward_tx_hash: status.forward_tx_hash,
+              failure_reason: status.failure_reason ?? null,
+            });
+          }
+        }
         setWithdrawalStatus(status.status);
         if (status.burn_tx_hash) setBurnTxHash(status.burn_tx_hash);
         if (status.forward_tx_hash) setForwardTxHash(status.forward_tx_hash);
@@ -725,6 +1013,9 @@ export function WalletPanel() {
         if (cancelled) return;
         const message = error instanceof Error ? error.message : 'Failed to refresh status';
         setFormError(message);
+        if (WITHDRAW_DEBUG_ENABLED) {
+          pushDebug('status:error', 'Failed to refresh withdrawal status', { message });
+        }
       }
     };
 
@@ -734,7 +1025,7 @@ export function WalletPanel() {
       cancelled = true;
       window.clearInterval(timerId);
     };
-  }, [getAuthToken, withdrawalId, forwardTxHash]);
+  }, [getAuthToken, withdrawalId, forwardTxHash, pushDebug]);
 
   const formattedBalance = useMemo(() => {
     if (!balance) return null;
@@ -745,14 +1036,35 @@ export function WalletPanel() {
       maximumFractionDigits: 4,
     }).format(numeric);
   }, [balance]);
+  const availabilityFeeMinor = useMemo(() => {
+    if (destination === 'base') return 0n;
+    if (quote) return BigInt(quote.max_fee_usdc_minor ?? 0);
+    return selectedFeeEstimateMinor > 0n ? selectedFeeEstimateMinor : 0n;
+  }, [destination, quote, selectedFeeEstimateMinor]);
+  const maxReceivableMinor = useMemo(() => {
+    if (balanceMinor === null) return null;
+    if (destination === 'base') return balanceMinor;
+    return balanceMinor > availabilityFeeMinor ? balanceMinor - availabilityFeeMinor : 0n;
+  }, [availabilityFeeMinor, balanceMinor, destination]);
+  const formattedMaxReceivable = useMemo(() => {
+    if (maxReceivableMinor === null) return null;
+    const numeric = Number(formatUnits(maxReceivableMinor, 6));
+    if (Number.isNaN(numeric)) return '0.00';
+    return new Intl.NumberFormat(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 4,
+    }).format(numeric);
+  }, [maxReceivableMinor]);
 
   const requiredPayMinor = useMemo(() => {
     if (!quote) return null;
     if (amountMode === 'pay') return parsedInputAmount ?? null;
     return BigInt(quote.total_burn_usdc_minor);
   }, [amountMode, parsedInputAmount, quote]);
+  const shouldValidateBalance = !isQuoteLocked && !isProcessingWithdrawal && !sending;
 
   const insufficientBalance =
+    shouldValidateBalance &&
     balanceMinor !== null &&
     requiredPayMinor !== null &&
     balanceMinor < requiredPayMinor;
@@ -791,6 +1103,11 @@ export function WalletPanel() {
     setLockedQuote(null);
     setLockedAmountInput(null);
     setLockedAmountMode(null);
+    if (WITHDRAW_DEBUG_ENABLED) {
+      setDebugEvents([]);
+      setShowDebug(false);
+      pushDebug('flow', 'Starting new withdrawal session');
+    }
     setWithdrawOpen(true);
     setStep(1);
   };
@@ -816,7 +1133,11 @@ export function WalletPanel() {
     setLockedQuote(null);
     setLockedAmountInput(null);
     setLockedAmountMode(null);
+    setShowDebug(false);
     setStep(1);
+    if (WITHDRAW_DEBUG_ENABLED) {
+      pushDebug('flow', 'Reset withdrawal flow');
+    }
   };
 
   useEffect(() => {
@@ -831,6 +1152,22 @@ export function WalletPanel() {
   const handleWithdraw = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError(null);
+    if (WITHDRAW_DEBUG_ENABLED) {
+      pushDebug('submit', 'Submitting withdrawal', {
+        destination,
+        amount_mode: amountMode,
+        amount_input: amountInput,
+        parsed_input_minor: parsedInputAmount?.toString() ?? null,
+        quote_id: quote?.quote_id ?? null,
+        quote_expired: quoteExpired,
+        balance_minor: balanceMinor?.toString() ?? null,
+        fee_basis_minor: feeBasisMinor,
+        selected_fee_estimate_minor: selectedFeeEstimateMinor.toString(),
+        quote_request_amount_minor: quoteRequestAmount?.toString() ?? null,
+        derived_pay_minor: derivedPayMinor ?? null,
+        derived_receive_minor: derivedReceiveMinor ?? null,
+      });
+    }
 
     if (config.errors.length) {
       setFormError(`Missing config: ${config.errors.join(', ')}`);
@@ -880,13 +1217,23 @@ export function WalletPanel() {
       }
     }
 
-    setLockedQuote(quote);
-    setLockedAmountInput(amountInput);
-    setLockedAmountMode(amountMode);
     setSending(true);
+    let createdWithdrawalId: string | null = null;
+    let burnTxHashLocal: string | null = null;
+    let burnSubmittedToBackend = false;
     try {
       if (destination === 'base') {
+        setLockedQuote(quote);
+        setLockedAmountInput(amountInput);
+        setLockedAmountMode(amountMode);
         const transferAmount = BigInt(quote.transfer_amount_usdc_minor);
+        if (WITHDRAW_DEBUG_ENABLED) {
+          pushDebug('onchain:transfer', 'Sending Base transfer', {
+            to: destinationAddress.trim(),
+            amount_minor: transferAmount.toString(),
+            token: config.usdcAddress,
+          });
+        }
         const transferData = encodeFunctionData({
           abi: erc20Abi,
           functionName: 'transfer',
@@ -909,10 +1256,21 @@ export function WalletPanel() {
         setBurnTxHash(transferTx.hash);
         setWithdrawalStatus('MINTED');
         setForwardTxHash(null);
+        if (WITHDRAW_DEBUG_ENABLED) {
+          pushDebug('onchain:transfer', 'Base transfer submitted', {
+            tx_hash: transferTx.hash,
+          });
+        }
         return;
       }
 
       const token = await getAuthToken();
+      if (WITHDRAW_DEBUG_ENABLED) {
+        pushDebug('api:create', 'Creating withdrawal', {
+          quote_id: quote.quote_id,
+          dest_address: destinationAddress.trim(),
+        });
+      }
       const createResponse = await createWithdrawal(
         token,
         {
@@ -922,8 +1280,18 @@ export function WalletPanel() {
         crypto.randomUUID()
       );
 
+      createdWithdrawalId = createResponse.withdrawal_id;
+      setLockedQuote(quote);
+      setLockedAmountInput(amountInput);
+      setLockedAmountMode(amountMode);
       setWithdrawalId(createResponse.withdrawal_id);
       setWithdrawalStatus(createResponse.status);
+      if (WITHDRAW_DEBUG_ENABLED) {
+        pushDebug('api:create', 'Withdrawal created', {
+          withdrawal_id: createResponse.withdrawal_id,
+          status: createResponse.status,
+        });
+      }
 
       const totalBurn = BigInt(quote.total_burn_usdc_minor);
       const maxFee = BigInt(quote.max_fee_usdc_minor);
@@ -937,15 +1305,27 @@ export function WalletPanel() {
           config.tokenMessengerAddress as `0x${string}`,
         ],
       });
+      if (WITHDRAW_DEBUG_ENABLED) {
+        pushDebug('onchain:allowance', 'USDC allowance read', {
+          allowance: allowance.toString(),
+          required: totalBurn.toString(),
+        });
+      }
 
       if (allowance < totalBurn) {
+        if (WITHDRAW_DEBUG_ENABLED) {
+          pushDebug('onchain:approve', 'Sending approve', {
+            spender: config.tokenMessengerAddress,
+            amount: MAX_UINT256.toString(),
+          });
+        }
         const approveData = encodeFunctionData({
           abi: erc20Abi,
           functionName: 'approve',
           args: [config.tokenMessengerAddress as `0x${string}`, MAX_UINT256],
         });
 
-        await sendTransaction(
+        const approveTx = await sendTransaction(
           {
             to: config.usdcAddress as `0x${string}`,
             data: approveData,
@@ -957,8 +1337,22 @@ export function WalletPanel() {
             sponsor: true,
           }
         );
+        if (WITHDRAW_DEBUG_ENABLED) {
+          pushDebug('onchain:approve', 'Approve submitted', {
+            tx_hash: approveTx.hash,
+          });
+        }
       }
 
+      if (WITHDRAW_DEBUG_ENABLED) {
+        pushDebug('onchain:burn', 'Sending burn transaction', {
+          total_burn_minor: totalBurn.toString(),
+          max_fee_minor: maxFee.toString(),
+          destination_domain: destinationConfig.domainId,
+          mint_recipient: destinationAddress.trim(),
+          token_messenger: config.tokenMessengerAddress,
+        });
+      }
       const burnData = encodeFunctionData({
         abi: TOKEN_MESSENGER_ABI,
         functionName: 'depositForBurnWithHook',
@@ -980,26 +1374,84 @@ export function WalletPanel() {
           data: burnData,
           value: 0n,
           chainId: config.sourceChain.id,
-        },
-        {
-          address: activeWalletAddress as `0x${string}`,
-          sponsor: true,
-        }
+          },
+          {
+            address: activeWalletAddress as `0x${string}`,
+            sponsor: true,
+          }
       );
 
+      burnTxHashLocal = burnTx.hash;
       setBurnTxHash(burnTx.hash);
+      if (WITHDRAW_DEBUG_ENABLED) {
+        pushDebug('onchain:burn', 'Burn tx submitted', { tx_hash: burnTx.hash });
+      }
 
+      if (WITHDRAW_DEBUG_ENABLED) {
+        pushDebug('api:burn-submitted', 'Submitting burn tx hash', {
+          withdrawal_id: createResponse.withdrawal_id,
+          burn_tx_hash: burnTx.hash,
+        });
+      }
       await submitBurnTx(
         token,
         createResponse.withdrawal_id,
         burnTx.hash,
         crypto.randomUUID()
       );
+      burnSubmittedToBackend = true;
+      if (WITHDRAW_DEBUG_ENABLED) {
+        pushDebug('api:burn-submitted', 'Burn tx hash submitted');
+      }
 
       setWithdrawalStatus('FORWARDING_PENDING');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Withdrawal failed';
-      setFormError(message);
+      const isUserRejected = /reject|denied|cancelled|canceled/i.test(message);
+      if (isQuoteExpiredError(message)) {
+        setLockedQuote(null);
+        setLockedAmountInput(null);
+        setLockedAmountMode(null);
+        setQuote(null);
+        setQuoteError(null);
+        setQuoteRefreshNonce((value) => value + 1);
+        setFormError('Quote expired. Refreshing quote, please confirm again.');
+        if (WITHDRAW_DEBUG_ENABLED) {
+          pushDebug('quote:recover', 'Quote expired/not found, forcing quote refresh', {
+            previous_quote_id: quote?.quote_id ?? null,
+          });
+        }
+      } else {
+        if (createdWithdrawalId && !burnTxHashLocal) {
+          setWithdrawalId(null);
+          setWithdrawalStatus(null);
+          setLockedQuote(null);
+          setLockedAmountInput(null);
+          setLockedAmountMode(null);
+          if (WITHDRAW_DEBUG_ENABLED) {
+            pushDebug('submit:recover', 'Create succeeded but tx was not sent, rolling back local state', {
+              withdrawal_id: createdWithdrawalId,
+            });
+          }
+        } else if (createdWithdrawalId && burnTxHashLocal && !burnSubmittedToBackend) {
+          setWithdrawalStatus('BURN_SUBMITTED');
+          setBurnTxHash(burnTxHashLocal);
+          if (WITHDRAW_DEBUG_ENABLED) {
+            pushDebug('submit:recover', 'Burn tx sent but submit endpoint failed; keeping polling state', {
+              withdrawal_id: createdWithdrawalId,
+              burn_tx_hash: burnTxHashLocal,
+            });
+          }
+        } else if (!createdWithdrawalId) {
+          setLockedQuote(null);
+          setLockedAmountInput(null);
+          setLockedAmountMode(null);
+        }
+        setFormError(isUserRejected ? 'Transaction cancelled in wallet.' : message);
+      }
+      if (WITHDRAW_DEBUG_ENABLED) {
+        pushDebug('submit:error', 'Withdrawal submit failed', { message });
+      }
     } finally {
       setSending(false);
     }
@@ -1014,6 +1466,11 @@ export function WalletPanel() {
       !amountInput || amountInput === '0' || amountInput === '0.' || amountInput === '0.0';
     const displayQuote = lockedQuote ?? quote;
     const displayMode = lockedAmountMode ?? amountMode;
+    const destinationAddressTrimmed = destinationAddress.trim();
+    const isDestinationAddressValid =
+      destinationAddressTrimmed.length > 0 && isAddress(destinationAddressTrimmed);
+    const hasDestinationAddressError =
+      destinationAddressTrimmed.length > 0 && !isDestinationAddressValid;
     return (
       <div className="fixed inset-0 z-50 bg-[#0a0a0a]">
         <div className="relative mx-auto flex h-full w-full max-w-md flex-col px-4 pt-5 pb-8">
@@ -1023,30 +1480,42 @@ export function WalletPanel() {
                 <button
                   type="button"
                   onClick={
-                    step > 1
-                      ? () =>
-                          setStep((current) =>
-                            current > 1 ? ((current - 1) as WithdrawStep) : current
-                          )
-                      : handleCloseWithdraw
+                    step === 4
+                      ? () => setStep(2)
+                      : step === 2
+                        ? () => setStep(1)
+                        : handleCloseWithdraw
                   }
                   disabled={sending}
-                  className="h-9 w-9 rounded-full bg-white/5 text-white transition hover:bg-white/10 disabled:opacity-60"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/5 text-white transition hover:bg-white/10 disabled:opacity-60"
                   aria-label={step > 1 ? 'Go back' : 'Close'}
                 >
-                  ←
+                  <ArrowLeftIcon />
                 </button>
               </div>
               <div className="text-center text-sm font-semibold text-white">{headerTitle}</div>
-              <div className="flex justify-end">
+              <div className="flex justify-end items-center gap-2">
+                {WITHDRAW_DEBUG_ENABLED && (
+                  <button
+                    type="button"
+                    onClick={() => setShowDebug((current) => !current)}
+                    className={`rounded-full border px-3 py-1 text-[10px] uppercase tracking-[0.2em] ${
+                      showDebug
+                        ? 'border-white/40 bg-white/10 text-white'
+                        : 'border-white/10 text-gray-400'
+                    }`}
+                  >
+                    Debug
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleCloseWithdraw}
                   disabled={sending}
-                  className="h-9 w-9 rounded-full bg-white/5 text-white transition hover:bg-white/10 disabled:opacity-60"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/5 text-white transition hover:bg-white/10 disabled:opacity-60"
                   aria-label="Close"
                 >
-                  ✕
+                  <CloseIcon />
                 </button>
               </div>
             </div>
@@ -1121,30 +1590,9 @@ export function WalletPanel() {
             {step === 2 && (
               <div className="flex flex-1 flex-col justify-between pb-6 pt-8 animate-slide-in">
                 <div className="flex flex-1 flex-col items-center justify-center space-y-5 text-center">
-                  <div className="flex items-center justify-center gap-2 text-[11px] text-gray-400">
-                    <button
-                      type="button"
-                      onClick={handleSelectPay}
-                      className={`rounded-full border px-3 py-1 transition ${
-                        amountMode === 'pay'
-                          ? 'border-white/40 bg-white/10 text-white'
-                          : 'border-white/10 text-gray-500'
-                      }`}
-                    >
-                      You pay
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSelectReceive}
-                      className={`rounded-full border px-3 py-1 transition ${
-                        amountMode === 'receive'
-                          ? 'border-white/40 bg-white/10 text-white'
-                          : 'border-white/10 text-gray-500'
-                      }`}
-                    >
-                      You receive
-                    </button>
-                  </div>
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-gray-500">
+                    Enter amount to receive
+                  </p>
 
                   <div className="flex h-[3.6rem] items-center justify-center">
                     <div className="inline-flex items-baseline">
@@ -1195,30 +1643,11 @@ export function WalletPanel() {
                     </div>
                   </div>
                   <p className="text-xs text-gray-500">
-                    {formattedBalance ?? '0.00'} USDC available
+                    {formattedMaxReceivable ?? '0.00'} USDC available to receive
+                    {destination !== 'base' && availabilityFeeMinor > 0n
+                      ? ` (fee ${formatUsdc(toNumberSafe(availabilityFeeMinor))} USDC)`
+                      : ''}
                   </p>
-                  <div className="space-y-1 text-xs">
-                    <div className="flex items-center justify-center gap-2">
-                      <span className="text-gray-500">You pay</span>
-                      <span className={amountMode === 'receive' ? 'text-white' : 'text-gray-400'}>
-                        {quoteLoading
-                          ? 'Calculating…'
-                          : derivedPayMinor !== null
-                            ? `${formatUsdc(derivedPayMinor)} USDC`
-                            : '—'}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-center gap-2">
-                      <span className="text-gray-500">You receive</span>
-                      <span className={amountMode === 'pay' ? 'text-white' : 'text-gray-400'}>
-                        {quoteLoading
-                          ? 'Calculating…'
-                          : derivedReceiveMinor !== null
-                            ? `${formatUsdc(derivedReceiveMinor)} USDC`
-                            : '—'}
-                      </span>
-                    </div>
-                  </div>
                 </div>
 
                 <div className="space-y-4">
@@ -1282,7 +1711,7 @@ export function WalletPanel() {
                   ) : (
                     <button
                       type="button"
-                      onClick={() => setStep(3)}
+                      onClick={() => setStep(4)}
                       disabled={!parsedInputAmount || parsedInputAmount <= 0n || belowMinReceive}
                       className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
                     >
@@ -1304,7 +1733,7 @@ export function WalletPanel() {
                     <button
                       type="button"
                       onClick={() => appendAmountChar('.')}
-                      className="rounded-2xl bg-[#121212] py-4 text-2xl text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                      className="rounded-2xl py-4 text-2xl text-white"
                     >
                       .
                     </button>
@@ -1318,30 +1747,19 @@ export function WalletPanel() {
                     <button
                       type="button"
                       onClick={handleAmountBackspace}
-                      className="rounded-2xl bg-[#121212] py-4 text-2xl text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                      className="inline-flex items-center justify-center rounded-2xl py-4 text-white"
+                      aria-label="Delete"
                     >
-                      ⌫
+                      <BackspaceIcon />
                     </button>
                   </div>
                 </div>
               </div>
             )}
 
-            {step === 3 && (
+            {step === 4 && (
               <div className="flex flex-1 flex-col justify-between pb-6 pt-6 animate-slide-in">
                 <div className="space-y-4">
-                  <div className="rounded-2xl border border-white/10 bg-[#111111] p-3 text-xs text-gray-300 space-y-1.5">
-                    <p>
-                      Network:{' '}
-                      <span className="text-white">{destinationConfig?.label ?? destination}</span>
-                    </p>
-                    {amountInput && (
-                      <p>
-                        {amountMode === 'receive' ? 'You receive' : 'You pay'}:{' '}
-                        <span className="text-white">{amountInput} USDC</span>
-                      </p>
-                    )}
-                  </div>
                   <div>
                     <label className="text-[11px] uppercase tracking-[0.2em] text-gray-500">
                       Destination address
@@ -1352,7 +1770,11 @@ export function WalletPanel() {
                         value={destinationAddress}
                         onChange={(event) => setDestinationAddress(event.target.value)}
                         placeholder="Enter address to send to"
-                        className="w-full rounded-2xl border border-white/10 bg-[#111111] px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/20"
+                        className={`w-full rounded-2xl bg-[#111111] px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 ${
+                          hasDestinationAddressError
+                            ? 'border border-red-500/70 focus:ring-red-500/40'
+                            : 'border border-white/10 focus:ring-white/20'
+                        }`}
                       />
                       <button
                         type="button"
@@ -1362,32 +1784,14 @@ export function WalletPanel() {
                         Paste
                       </button>
                     </div>
-                    {destinationAddress.trim() && isAddress(destinationAddress.trim()) && (
+                    {hasDestinationAddressError && (
+                      <p className="mt-2 text-[11px] text-red-400">Invalid address</p>
+                    )}
+                    {isDestinationAddressValid && (
                       <p className="mt-2 text-[11px] text-emerald-300">Address looks valid</p>
                     )}
                   </div>
-                  {formError && <p className="text-xs text-red-400">{formError}</p>}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!isAddress(destinationAddress.trim())) {
-                      setFormError('Destination address is invalid');
-                      return;
-                    }
-                    setStep(4);
-                  }}
-                  disabled={!destinationAddress.trim()}
-                  className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black disabled:bg-white/10 disabled:text-white/40"
-                >
-                  Preview
-                </button>
-              </div>
-            )}
 
-            {step === 4 && (
-              <div className="flex flex-1 flex-col justify-between pb-6 pt-6 animate-slide-in">
-                <div className="space-y-4">
                   <div className="rounded-2xl border border-white/10 bg-[#111111] p-4 space-y-3">
                     <div className="text-center">
                       <p className="text-2xl font-semibold text-white">
@@ -1415,7 +1819,13 @@ export function WalletPanel() {
                       </div>
                       <div className="flex items-center justify-between">
                         <span>To</span>
-                        <span className="text-white">{destinationAddress.trim() || '—'}</span>
+                        <span className={hasDestinationAddressError ? 'text-red-400' : 'text-white'}>
+                          {destinationAddressTrimmed
+                            ? isDestinationAddressValid
+                              ? truncateAddress(destinationAddressTrimmed)
+                              : destinationAddressTrimmed
+                            : '—'}
+                        </span>
                       </div>
                     </div>
                     <div className="border-t border-white/10 pt-3 space-y-1.5 text-xs text-gray-300">
@@ -1460,16 +1870,9 @@ export function WalletPanel() {
                     </div>
                   </div>
 
-                  {quote && quoteExpired && (
-                    <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-xs text-yellow-300 flex items-center justify-between gap-3">
-                      <span>Quote expired. Refreshing automatically…</span>
-                      <button
-                        type="button"
-                        onClick={() => setQuoteRefreshNonce((value) => value + 1)}
-                        className="rounded-md border border-yellow-500/40 bg-yellow-500/10 px-2 py-1 text-[11px] text-yellow-200 transition hover:bg-yellow-500/20"
-                      >
-                        Refresh now
-                      </button>
+                  {quote && quoteExpired && !isQuoteLocked && !sending && (
+                    <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-xs text-yellow-300">
+                      Quote expired. Refreshing automatically…
                     </div>
                   )}
 
@@ -1527,7 +1930,7 @@ export function WalletPanel() {
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       type="button"
-                      onClick={() => setStep(3)}
+                      onClick={() => setStep(2)}
                       disabled={sending || isProcessingWithdrawal}
                       className="w-full rounded-2xl border border-white/15 bg-white/5 py-3 text-sm text-white transition hover:bg-white/10 disabled:opacity-50"
                     >
@@ -1541,7 +1944,7 @@ export function WalletPanel() {
                         !activeWalletAddress ||
                         !parsedInputAmount ||
                         !destinationConfig ||
-                        !destinationAddress.trim() ||
+                        !isDestinationAddressValid ||
                         quoteLoading ||
                         !quote ||
                         quoteExpired ||
@@ -1571,6 +1974,43 @@ export function WalletPanel() {
                 </div>
               </div>
             )}
+
+            {WITHDRAW_DEBUG_ENABLED && showDebug && (
+              <div className="mt-4 rounded-2xl border border-white/10 bg-[#111111] p-3 text-[11px] text-gray-300 max-h-48 overflow-auto">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-[0.2em] text-gray-500">
+                    Debug log
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setDebugEvents([])}
+                    className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-gray-300"
+                  >
+                    Clear
+                  </button>
+                </div>
+                {debugEvents.length === 0 ? (
+                  <p className="text-gray-500">No debug events yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {debugEvents.map((entry, index) => (
+                      <div key={`${entry.ts}-${index}`} className="border-b border-white/5 pb-2">
+                        <div className="flex items-center justify-between text-[10px] text-gray-500">
+                          <span>{new Date(entry.ts).toLocaleTimeString()}</span>
+                          <span className="text-gray-400">{entry.stage}</span>
+                        </div>
+                        <div className="text-gray-200">{entry.message}</div>
+                        {entry.data ? (
+                          <pre className="mt-1 whitespace-pre-wrap break-words text-[10px] text-gray-400">
+                            {safeStringify(entry.data)}
+                          </pre>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </form>
         </div>
       </div>
@@ -1583,7 +2023,7 @@ export function WalletPanel() {
         <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400">Your wallet</p>
         <div className="-mx-1 mt-2 flex w-auto items-center gap-2 rounded-2xl border border-white/10 bg-black/35 px-3 py-2">
           <p className="min-w-0 flex-1 break-all text-[11px] leading-4 text-white font-mono select-all">
-            {activeWalletAddress ?? '—'}
+            {activeWalletAddress ? truncateAddress(activeWalletAddress) : '—'}
           </p>
           {activeWalletAddress && (
             <button

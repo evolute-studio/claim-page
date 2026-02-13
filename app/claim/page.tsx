@@ -90,7 +90,13 @@ function ClaimContent() {
     setError(null);
 
     try {
-      const privyIdentityToken = identityToken ?? (await getIdentityToken());
+      let freshToken: string | null = null;
+      try {
+        freshToken = await getIdentityToken();
+      } catch {
+        freshToken = null;
+      }
+      const privyIdentityToken = freshToken ?? identityToken;
       if (!privyIdentityToken) {
         throw new Error('Missing identity token. Please re-login.');
       }

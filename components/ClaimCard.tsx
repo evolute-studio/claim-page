@@ -1,6 +1,7 @@
 'use client';
 
 import { PayoutStatus } from '@/types/payout';
+import { truncateAddress } from '@/lib/format';
 import { StatusBadge } from './StatusBadge';
 import { LoadingSpinner } from './LoadingSpinner';
 
@@ -41,10 +42,6 @@ function formatTimeRemaining(expiresAt: number): string {
     return `Expires in ${days} day${days > 1 ? 's' : ''}`;
   }
   return `Expires in ${hours} hour${hours > 1 ? 's' : ''}`;
-}
-
-function truncateAddress(address: string): string {
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
 function USDCIcon() {

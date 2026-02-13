@@ -42,6 +42,30 @@ const DEST_DOMAIN_BY_CHAIN: Record<DestinationChain, number> = {
   linea: 11,
 };
 
+/*
+Field mapping (frontend -> backend)
+
+Quote:
+- transfer_amount_usdc_minor -> amount_minor (backend treats as "receive" amount)
+- fee_protocol_usdc_minor -> bridge_fee_minor
+- fee_forward_usdc_minor -> forward_fee_minor
+- max_fee_usdc_minor -> total_fee_minor (when max_fee_usdc_minor missing)
+- total_burn_usdc_minor -> (not returned by backend; derived on frontend)
+- expires_at -> expires_at (Unix seconds)
+
+Withdrawal list/status:
+- id -> withdrawal_id
+- transfer_amount_usdc_minor -> amount_minor / net_amount_minor
+- total_burn_usdc_minor -> total_amount_minor (optional)
+- max_fee_usdc_minor -> total_fee_minor
+- fee_protocol_usdc_minor -> bridge_fee_minor
+- fee_forward_usdc_minor -> forward_fee_minor
+- burn_tx_hash -> burn_tx_hash
+- forward_tx_hash -> forward_tx_hash
+- failure_reason -> error_msg / error
+- created_at / updated_at -> Unix ms
+*/
+
 function toApiDestChain(chain: DestinationChain): string {
   return chain === 'optimism' ? 'op' : chain;
 }
@@ -146,6 +170,24 @@ function normalizeWithdrawal(raw: Record<string, unknown>): WithdrawalListItem |
     updated_at: toNumber(raw.updated_at ?? raw.updatedAt) || null,
     burn_tx_at: toNumber(raw.burn_tx_at ?? raw.burnTxAt) || null,
     forward_tx_at: toNumber(raw.forward_tx_at ?? raw.forwardTxAt) || null,
+    failure_reason:
+      readStringField(raw, ['failure_reason', 'failureReason', 'error', 'error_msg']) ?? null,
+  };
+}
+
+function normalizeWithdrawalStatus(
+  raw: Record<string, unknown>
+): WithdrawalStatusResponse {
+  const id = readStringField(raw, ['withdrawal_id', 'id', 'withdrawalId']);
+  const status = readStringField(raw, ['status', 'state']) as WithdrawalStatusResponse['status'] | undefined;
+  if (!id || !status) {
+    throw new Error('Invalid withdrawal status response');
+  }
+  return {
+    id,
+    status,
+    burn_tx_hash: readStringField(raw, ['burn_tx_hash', 'burnTxHash', 'tx_hash']) ?? null,
+    forward_tx_hash: readStringField(raw, ['forward_tx_hash', 'forwardTxHash']) ?? null,
     failure_reason:
       readStringField(raw, ['failure_reason', 'failureReason', 'error', 'error_msg']) ?? null,
   };
@@ -432,7 +474,10 @@ export async function getWithdrawalStatus(
   if (!res.ok) {
     throw new Error(data.message || 'Failed to load withdrawal status');
   }
-  return data;
+  if (!data || typeof data !== 'object') {
+    throw new Error('Invalid withdrawal status response');
+  }
+  return normalizeWithdrawalStatus(data as Record<string, unknown>);
 }
 
 export async function getMyWithdrawals(
