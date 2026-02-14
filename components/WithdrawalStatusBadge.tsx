@@ -7,27 +7,27 @@ interface WithdrawalStatusBadgeProps {
 const statusConfig: Record<WithdrawalStatus, { text: string; className: string }> = {
   CREATED: {
     text: 'Created',
-    className: 'bg-gray-500/20 text-gray-300 border-gray-500/30',
+    className: 'bg-white/5 text-gray-300 border-white/15',
   },
   BURN_SUBMITTED: {
     text: 'Burn submitted',
-    className: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+    className: 'bg-[rgba(14,165,233,0.16)] text-[#a9ddf4] border-[rgba(14,165,233,0.34)]',
   },
   FORWARDING_PENDING: {
     text: 'Forwarding',
-    className: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
+    className: 'bg-[rgba(245,158,11,0.16)] text-[#f6d88f] border-[rgba(245,158,11,0.34)]',
   },
   MINTED: {
     text: 'Completed',
-    className: 'bg-green-500/20 text-green-400 border-green-500/30',
+    className: 'bg-[rgba(16,185,129,0.16)] text-[#9ee6cb] border-[rgba(16,185,129,0.34)]',
   },
   FAILED: {
     text: 'Failed',
-    className: 'bg-red-500/20 text-red-400 border-red-500/30',
+    className: 'bg-[rgba(244,63,94,0.16)] text-[#f4b3c3] border-[rgba(244,63,94,0.34)]',
   },
   EXPIRED: {
     text: 'Expired',
-    className: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+    className: 'bg-white/5 text-gray-300 border-white/15',
   },
 };
 

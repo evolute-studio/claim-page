@@ -41,6 +41,39 @@ body {
   }
 }
 
+@keyframes historyViewIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes historyViewSlideLeft {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes historyViewSlideRight {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 .animate-slide-in {
   animation: slideIn 180ms ease-out;
 }
@@ -64,9 +97,55 @@ body {
   animation: sheetIn 220ms ease-out;
 }
 
+.animate-history-view-in {
+  animation: historyViewIn 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.animate-history-view-slide-left {
+  animation: historyViewSlideLeft 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.animate-history-view-slide-right {
+  animation: historyViewSlideRight 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.transient-scrollbar {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.transient-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.transient-scrollbar--visible {
+  -ms-overflow-style: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.6) transparent;
+}
+
+.transient-scrollbar--visible::-webkit-scrollbar {
+  width: 6px;
+}
+
+.transient-scrollbar--visible::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.transient-scrollbar--visible::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.55);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in-up,
-  .animate-sheet-in {
+  .animate-sheet-in,
+  .animate-history-view-in,
+  .animate-history-view-slide-left,
+  .animate-history-view-slide-right {
     animation: none;
   }
 }

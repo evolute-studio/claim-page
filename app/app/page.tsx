@@ -1,16 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { UserPill } from '@privy-io/react-auth/ui';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { WalletPanel } from '@/components/WalletPanel';
-import { PayoutsPanel } from '@/components/PayoutsPanel';
-import { WithdrawalsPanel } from '@/components/WithdrawalsPanel';
+import { HistoryPanel } from '@/components/HistoryPanel';
 import { truncateAddress } from '@/lib/format';
 
-type AppTab = 'wallet' | 'payouts' | 'withdrawals';
+type AppTab = 'wallet' | 'history';
 
 function AccountIcon() {
   return (
@@ -84,7 +83,7 @@ function WalletIcon({ active }: { active: boolean }) {
   );
 }
 
-function TrophyIcon({ active }: { active: boolean }) {
+function HistoryIcon({ active }: { active: boolean }) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -94,31 +93,15 @@ function TrophyIcon({ active }: { active: boolean }) {
       strokeWidth="1.8"
       aria-hidden="true"
     >
-      <path d="M8 4h8v3a4 4 0 1 1-8 0V4Z" />
-      <path d="M7 6H5a2 2 0 0 0 2 2M17 6h2a2 2 0 0 1-2 2" />
-      <path d="M10 15h4M9 19h6" />
-    </svg>
-  );
-}
-
-function WithdrawIcon({ active }: { active: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className={`h-5 w-5 ${active ? 'text-white' : 'text-gray-400'}`}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      aria-hidden="true"
-    >
-      <path d="M7 7h10M7 7l3-3M7 7l3 3" />
-      <path d="M17 17H7M17 17l-3-3M17 17l-3 3" />
+      <path d="M12 7v5l3 2" />
+      <circle cx="12" cy="12" r="8" />
     </svg>
   );
 }
 
 export default function AppPage() {
   const router = useRouter();
+  const routerRef = useRef(router);
   const searchParams = useSearchParams();
   const { wallets } = useWallets();
   const { ready, authenticated } = usePrivy();
@@ -131,6 +114,10 @@ export default function AppPage() {
   const walletAddress = wallets[0]?.address ?? null;
 
   useEffect(() => {
+    routerRef.current = router;
+  }, [router]);
+
+  useEffect(() => {
     if (!ready) return;
     if (!authenticated) {
       router.replace('/');
@@ -140,13 +127,18 @@ export default function AppPage() {
   useEffect(() => {
     if (!queryFocusToken) return;
     setFocusToken((current) => current ?? queryFocusToken);
-    setActiveTab('payouts');
-    router.replace('/app?tab=payouts');
-  }, [queryFocusToken, router]);
+    setActiveTab('history');
+    routerRef.current.replace('/app?tab=history');
+  }, [queryFocusToken]);
 
   useEffect(() => {
-    if (queryTab === 'wallet' || queryTab === 'payouts' || queryTab === 'withdrawals') {
+    if (queryTab === 'wallet' || queryTab === 'history') {
       setActiveTab(queryTab);
+      return;
+    }
+    if (queryTab === 'payouts' || queryTab === 'withdrawals') {
+      setActiveTab('history');
+      routerRef.current.replace('/app?tab=history');
     }
   }, [queryTab]);
 
@@ -253,10 +245,8 @@ export default function AppPage() {
         >
           {activeTab === 'wallet' ? (
             <WalletPanel />
-          ) : activeTab === 'payouts' ? (
-            <PayoutsPanel focusToken={focusToken ?? queryFocusToken} />
           ) : (
-            <WithdrawalsPanel />
+            <HistoryPanel focusToken={focusToken ?? queryFocusToken} />
           )}
         </div>
       </div>
@@ -280,27 +270,15 @@ export default function AppPage() {
           </button>
           <button
             type="button"
-            onClick={() => handleTabChange('payouts')}
+            onClick={() => handleTabChange('history')}
             className={`flex h-12 flex-1 items-center justify-center gap-2 rounded-xl text-sm font-medium transition ${
-              activeTab === 'payouts'
+              activeTab === 'history'
                 ? 'bg-white/10 text-white'
                 : 'text-gray-300 hover:bg-white/5'
             }`}
           >
-            <TrophyIcon active={activeTab === 'payouts'} />
-            Payouts
-          </button>
-          <button
-            type="button"
-            onClick={() => handleTabChange('withdrawals')}
-            className={`flex h-12 flex-1 items-center justify-center gap-2 rounded-xl text-sm font-medium transition ${
-              activeTab === 'withdrawals'
-                ? 'bg-white/10 text-white'
-                : 'text-gray-300 hover:bg-white/5'
-            }`}
-          >
-            <WithdrawIcon active={activeTab === 'withdrawals'} />
-            Withdrawals
+            <HistoryIcon active={activeTab === 'history'} />
+            History
           </button>
         </div>
       </nav>
