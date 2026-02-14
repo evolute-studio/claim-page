@@ -436,14 +436,32 @@ export function HistoryPanel({
       )}
 
       {loading ? (
-        <p
-          className={`text-sm text-gray-400 transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+        <div
+          className={`min-h-0 flex-1 overflow-hidden transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
             isActive ? 'translate-x-0 opacity-100 brightness-100' : 'translate-x-8 opacity-35 brightness-50'
           }`}
           style={{ transitionDelay: '160ms' }}
         >
-          Loading history...
-        </p>
+          <div className="h-full space-y-3">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <div
+                key={`history-skeleton-${index}`}
+                className="rounded-2xl border border-white/8 bg-black/35 p-3"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <span className="inline-flex h-6 w-28 animate-pulse rounded bg-white/10" />
+                    <span className="mt-2 block h-3.5 w-24 animate-pulse rounded bg-white/8" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-6 w-24 animate-pulse rounded-full bg-white/10" />
+                    <span className="inline-flex h-8 w-8 animate-pulse rounded-full bg-white/10" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       ) : (
         <div
           className={`min-h-0 flex-1 overflow-hidden transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
@@ -456,7 +474,7 @@ export function HistoryPanel({
               view === 'outcomes' ? '-translate-x-1/2' : 'translate-x-0'
             }`}
           >
-            <div className="min-h-0 h-full w-1/2 pr-1">
+            <div className="min-h-0 h-full w-1/2">
               {incomes.length === 0 ? (
                 <p className="text-sm text-gray-400">No incomes found.</p>
               ) : (
@@ -469,7 +487,7 @@ export function HistoryPanel({
                   onTouchStart={() => armListScroll('incomes')}
                   onTouchMove={() => armListScroll('incomes')}
                   onScroll={() => handleListScroll('incomes')}
-                  className={`min-h-0 h-full space-y-3 pr-1 transient-scrollbar ${
+                  className={`min-h-0 h-full space-y-3 transient-scrollbar ${
                     incomesScrolling && view === 'incomes' ? 'transient-scrollbar--visible' : ''
                   }`}
                 >
@@ -512,7 +530,7 @@ export function HistoryPanel({
               )}
             </div>
 
-            <div className="min-h-0 h-full w-1/2 pl-1">
+            <div className="min-h-0 h-full w-1/2">
               {outcomes.length === 0 ? (
                 <p className="text-sm text-gray-400">No outcomes found.</p>
               ) : (
@@ -525,7 +543,7 @@ export function HistoryPanel({
                   onTouchStart={() => armListScroll('outcomes')}
                   onTouchMove={() => armListScroll('outcomes')}
                   onScroll={() => handleListScroll('outcomes')}
-                  className={`min-h-0 h-full space-y-3 pr-1 transient-scrollbar ${
+                  className={`min-h-0 h-full space-y-3 transient-scrollbar ${
                     outcomesScrolling && view === 'outcomes' ? 'transient-scrollbar--visible' : ''
                   }`}
                 >

@@ -9,6 +9,7 @@ import {
   useWallets,
 } from '@privy-io/react-auth';
 import type { SendTransactionModalUIOptions } from '@privy-io/react-auth';
+import { ArrowLeft, Circle, X } from 'lucide-react';
 import {
   createPublicClient,
   encodeFunctionData,
@@ -54,6 +55,7 @@ const ZERO_BYTES32 = `0x${'0'.repeat(64)}` as `0x${string}`;
 const MAX_UINT256 = (2n ** 256n - 1n) as bigint;
 const WITHDRAW_DEBUG_ENABLED =
   (process.env.NEXT_PUBLIC_WITHDRAW_DEBUG ?? '').toLowerCase() === 'true';
+const SHOW_WITHDRAW_DEBUG_TOGGLE = false;
 
 type WithdrawDebugEvent = {
   ts: number;
@@ -194,63 +196,6 @@ function BackspaceIcon({ size = 24 }: { size?: number }) {
   );
 }
 
-// ArrowLeft and X icon shapes from Lucide (ISC License), embedded as inline SVG.
-function ArrowLeftIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-    >
-      <path
-        d="m12 19-7-7 7-7"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M19 12H5"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function CloseIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-    >
-      <path
-        d="M18 6 6 18"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="m6 6 12 12"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 // Send icon shape from Lucide (ISC License), embedded as inline SVG.
 function SendIcon({ size = 16 }: { size?: number }) {
   return (
@@ -280,112 +225,70 @@ function SendIcon({ size = 16 }: { size?: number }) {
   );
 }
 
-function NetworkIcon({ chainName, size = 16 }: { chainName: string; size?: number }) {
+const NETWORK_ICON_FILE_MAP: Partial<Record<DestinationChain, string>> = {
+  base: '/icons/base.jpeg',
+  ethereum: '/icons/ethereum.svg',
+  arbitrum: '/icons/arbitrum.svg',
+  optimism: '/icons/optimism.svg',
+  polygon: '/icons/polygon.png',
+  avalanche: '/icons/avalanche.jpeg',
+  linea: '/icons/linea.svg',
+};
+
+function NetworkIcon({
+  chainKey,
+  chainName,
+  size = 16,
+}: {
+  chainKey: DestinationChain;
+  chainName: string;
+  size?: number;
+}) {
   const name = chainName.toLowerCase();
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
 
-  if (name.includes('base')) {
-    return (
-      <svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <circle cx="12" cy="12" r="12" fill="#0052FF" />
-        <path
-          d="M6 12C6 8.686 8.686 6 12 6H18V10H12C10.895 10 10 10.895 10 12C10 13.105 10.895 14 12 14H18V18H12C8.686 18 6 15.314 6 12Z"
-          fill="white"
-        />
-      </svg>
-    );
+  let logoUrl = NETWORK_ICON_FILE_MAP[chainKey] ?? null;
+  if (!logoUrl) {
+    if (name.includes('base')) logoUrl = NETWORK_ICON_FILE_MAP.base ?? null;
+    else if (name.includes('ethereum')) logoUrl = NETWORK_ICON_FILE_MAP.ethereum ?? null;
+    else if (name.includes('arbitrum')) logoUrl = NETWORK_ICON_FILE_MAP.arbitrum ?? null;
+    else if (name.includes('optimism') || name.startsWith('op ') || name.includes(' op')) {
+      logoUrl = NETWORK_ICON_FILE_MAP.optimism ?? null;
+    } else if (name.includes('polygon')) logoUrl = NETWORK_ICON_FILE_MAP.polygon ?? null;
+    else if (name.includes('avalanche') || name.includes('fuji')) {
+      logoUrl = NETWORK_ICON_FILE_MAP.avalanche ?? null;
+    } else if (name.includes('linea')) logoUrl = NETWORK_ICON_FILE_MAP.linea ?? null;
   }
 
-  if (name.includes('ethereum')) {
-    return (
-      <svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <circle cx="12" cy="12" r="12" fill="#627EEA" />
-        <path d="M12 4L7.5 12L12 9.5L16.5 12L12 4Z" fill="white" />
-        <path d="M12 10.5L7.5 13L12 20L16.5 13L12 10.5Z" fill="#DCE6FF" />
-      </svg>
-    );
-  }
+  useEffect(() => {
+    setLogoLoadFailed(false);
+  }, [logoUrl]);
 
-  if (name.includes('arbitrum')) {
-    return (
-      <svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <circle cx="12" cy="12" r="12" fill="#2D374B" />
-        <path d="M7 15.5L10.5 7H13L9.5 15.5H7Z" fill="#28A0F0" />
-        <path d="M10.5 15.5L14 7H16.5L13 15.5H10.5Z" fill="#9DCCED" />
-      </svg>
-    );
-  }
-
-  if (name.includes('optimism')) {
-    return (
-      <svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <circle cx="12" cy="12" r="12" fill="#FF0420" />
-        <text x="12" y="15" textAnchor="middle" fontSize="7" fontWeight="700" fill="white">
-          OP
-        </text>
-      </svg>
-    );
-  }
-
-  if (name.includes('polygon')) {
-    return (
-      <svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <circle cx="12" cy="12" r="12" fill="#8247E5" />
-        <path
-          d="M8.5 10L11 8.5L13.5 10V13L11 14.5L8.5 13V10Z"
-          stroke="white"
-          strokeWidth="1.4"
-        />
-      </svg>
-    );
-  }
+  const iconSize = Math.max(10, Math.round(size * 0.66));
+  const logoClass =
+    chainKey === 'ethereum'
+      ? 'h-full w-full object-contain object-center'
+      : 'h-full w-full object-cover object-center';
 
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
+    <span
+      className="relative inline-flex aspect-square flex-none items-center justify-center overflow-hidden rounded-[12px] border border-transparent bg-transparent"
+      style={{ width: size, minWidth: size, maxWidth: size, height: size, minHeight: size, maxHeight: size }}
       aria-hidden="true"
     >
-      <circle cx="12" cy="12" r="12" fill="#475569" />
-      <circle cx="12" cy="12" r="5" stroke="white" strokeWidth="1.4" />
-    </svg>
+      {logoUrl && !logoLoadFailed ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={logoUrl}
+          alt=""
+          className={logoClass}
+          loading="lazy"
+          onError={() => setLogoLoadFailed(true)}
+        />
+      ) : (
+        <Circle size={iconSize} strokeWidth={2} className="text-white" />
+      )}
+    </span>
   );
 }
 
@@ -621,6 +524,7 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
     quoteLoading,
     feeEstimateMinor,
     quoteRequestAmount,
+    quoteExpiresAtMs,
     quoteExpired,
     quoteTimeRemaining,
     refreshQuote,
@@ -670,6 +574,13 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
   }, [amountMode, effectiveParsedInputAmount, feeBasisMinor, lockedAmountMode, quote]);
   const minReceiveMinor = MIN_WITHDRAW_RECEIVE_MINOR;
   const minPayMinor = feeBasisMinor + minReceiveMinor;
+  const showQuoteRefreshingHint =
+    !!quote &&
+    quoteExpired &&
+    !isQuoteLocked &&
+    !sending &&
+    !!quoteExpiresAtMs &&
+    Date.now() - quoteExpiresAtMs >= 5_000;
   const belowMinReceive =
     effectiveParsedInputAmount !== null &&
     effectiveParsedInputAmount > 0n &&
@@ -745,6 +656,7 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
       maximumFractionDigits: 2,
     }).format(numeric);
   }, [balance]);
+  const showBalanceSkeleton = balanceLoading && !formattedBalance && !balanceError;
   const availabilityFeeMinor = useMemo(() => {
     if (destination === 'base') return 0n;
     if (quote) return BigInt(quote.max_fee_usdc_minor ?? 0);
@@ -1323,7 +1235,7 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
   }, [markClaimablePayoutsScrolling]);
 
   if (withdrawOpen) {
-    const headerTitle = step === 4 ? 'Review' : 'Send';
+    const headerTitle = 'Send';
     const amountDisplay = effectiveAmountInput || '0.00';
     const amountDisplayWidth = `${Math.max(amountDisplay.length, 1)}ch`;
     const amountFontSize = getAmountFontSize(amountDisplay);
@@ -1353,9 +1265,9 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
         ? 'Processing...'
         : 'Confirm';
     return (
-      <div className="withdraw-flow fixed inset-0 z-50 bg-[#0a0a0a]">
+      <div className="withdraw-flow font-num fixed inset-0 z-50 bg-[#0a0a0a]">
         <div className="relative mx-auto flex h-full w-full max-w-md flex-col px-4 pt-5 pb-8">
-          <form className="flex-1 flex flex-col" onSubmit={handleWithdraw}>
+          <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleWithdraw}>
             <div className="grid grid-cols-3 items-center">
               <div className="flex items-center">
                 <button
@@ -1371,19 +1283,19 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
                   className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/5 text-white transition hover:bg-white/10 disabled:opacity-60"
                   aria-label={step > 1 ? 'Go back' : 'Close'}
                 >
-                  <ArrowLeftIcon />
+                  <ArrowLeft size={18} strokeWidth={2} />
                 </button>
               </div>
-              <div className="text-center text-sm font-semibold text-white">{headerTitle}</div>
+              <div className="text-center text-[18px] font-semibold text-white">{headerTitle}</div>
               <div className="flex justify-end items-center gap-2">
-                {WITHDRAW_DEBUG_ENABLED && (
+                {WITHDRAW_DEBUG_ENABLED && SHOW_WITHDRAW_DEBUG_TOGGLE && (
                   <button
                     type="button"
                     onClick={() => setShowDebug((current) => !current)}
-                    className={`rounded-full border px-3 py-1 text-[10px] uppercase tracking-[0.2em] ${
+                    className={`rounded-full border px-3 py-1 text-[10px] tracking-[0.08em] ${
                       showDebug
-                        ? 'border-white/40 bg-white/10 text-white'
-                        : 'border-white/10 text-gray-400'
+                        ? 'border-white/30 bg-white/10 text-white'
+                        : 'border-white/10 text-gray-500'
                     }`}
                   >
                     Debug
@@ -1396,7 +1308,7 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
                   className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/5 text-white transition hover:bg-white/10 disabled:opacity-60"
                   aria-label="Close"
                 >
-                  <CloseIcon />
+                  <X size={18} strokeWidth={2} />
                 </button>
               </div>
             </div>
@@ -1459,9 +1371,7 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
                 displayQuote={displayQuote}
                 quoteError={quoteError}
                 displayMode={displayMode}
-                quote={quote}
-                quoteExpired={quoteExpired}
-                sending={sending}
+                showQuoteRefreshingHint={showQuoteRefreshingHint}
                 formError={formError}
                 insufficientBalance={insufficientBalance}
                 belowMinReceive={belowMinReceive}
@@ -1530,17 +1440,15 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
         style={{ transitionDelay: '0ms' }}
       >
         <p className="font-num text-base uppercase tracking-[0.14em] text-gray-500">Your balance</p>
-        {formattedBalance ? (
-          <p className="font-num mt-4 text-5xl font-semibold leading-none tracking-[0.04em] text-white">
-            ~{formattedBalance} <span className="text-gray-400">USDC</span>
-          </p>
-        ) : balanceError ? (
+        {balanceError ? (
           <p className="mt-2 text-sm text-red-400">{balanceError}</p>
-        ) : balanceLoading ? (
-          <p className="mt-2 text-sm text-gray-400">Loading...</p>
+        ) : showBalanceSkeleton ? (
+          <div className="mt-4 flex min-h-[48px] items-center justify-center">
+            <span className="inline-flex h-10 w-52 animate-pulse rounded-xl bg-white/10" />
+          </div>
         ) : (
           <p className="font-num mt-4 text-5xl font-semibold leading-none tracking-[0.04em] text-white">
-            ~0.00 <span className="text-gray-400">USDC</span>
+            ~{formattedBalance ?? '0.00'} <span className="text-gray-400">USDC</span>
           </p>
         )}
       </div>
@@ -1593,12 +1501,25 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
             onTouchStart={armClaimablePayoutsScroll}
             onTouchMove={armClaimablePayoutsScroll}
             onScroll={handleClaimablePayoutsScroll}
-            className={`min-h-0 flex-1 pr-1 transient-scrollbar ${
+            className={`min-h-0 flex-1 transient-scrollbar ${
               claimablePayoutsScrolling ? 'transient-scrollbar--visible' : ''
             }`}
           >
             {claimablePayoutsLoading ? (
-              <p className="text-sm text-gray-400">Loading payouts...</p>
+              <div className="space-y-3 pb-2">
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <div key={`claimable-skeleton-${index}`} className="overflow-hidden rounded-2xl border border-white/8 bg-white/[0.02] p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <span className="block h-8 w-40 animate-pulse rounded-lg bg-white/10" />
+                        <span className="mt-2 block h-3.5 w-24 animate-pulse rounded bg-white/8" />
+                      </div>
+                      <span className="block h-8 w-8 animate-pulse rounded-full bg-white/10" />
+                    </div>
+                    <span className="mt-4 block h-11 w-full animate-pulse rounded-xl bg-white/8" />
+                  </div>
+                ))}
+              </div>
             ) : claimablePayouts.length === 0 ? (
               <p className="text-sm text-gray-500">No claimable payouts.</p>
             ) : (

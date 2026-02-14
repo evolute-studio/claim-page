@@ -239,20 +239,20 @@ export default function AppPage() {
           )}
         </header>
 
-        <div className="min-h-0 flex-1 overflow-hidden pb-[calc(7rem+env(safe-area-inset-bottom))] pr-1">
+        <div className="min-h-0 flex-1 overflow-hidden pb-[calc(7rem+env(safe-area-inset-bottom))]">
           <div
             className="flex h-full w-[200%] transition-[margin-left] duration-[600ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
             style={{ marginLeft: activeTab === 'history' ? '-100%' : '0%' }}
           >
             <div
-              className={`h-full min-h-0 w-1/2 pr-1 ${
+              className={`h-full min-h-0 w-1/2 px-1 ${
                 activeTab === 'wallet' ? 'pointer-events-auto' : 'pointer-events-none'
               }`}
             >
               <WalletPanel isActive={activeTab === 'wallet'} />
             </div>
             <div
-              className={`h-full min-h-0 w-1/2 pl-1 ${
+              className={`h-full min-h-0 w-1/2 px-1 ${
                 activeTab === 'history' ? 'pointer-events-auto' : 'pointer-events-none'
               }`}
             >

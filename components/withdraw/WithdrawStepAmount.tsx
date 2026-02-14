@@ -92,6 +92,8 @@ export function WithdrawStepAmount({
     onAmountChange(formatUnits(available, 6));
   };
 
+  const hasFractionPart = amountDisplay.includes('.');
+
   return (
     <div className="flex flex-1 flex-col justify-between pb-6 pt-8 animate-slide-in">
       <div className="flex flex-1 flex-col items-center justify-center space-y-5 text-center">
@@ -110,11 +112,11 @@ export function WithdrawStepAmount({
               aria-label="USDC amount"
               style={{
                 width: amountDisplayWidth,
-                marginRight: '0.2em',
+                marginRight: hasFractionPart ? '0.14em' : '0.22em',
                 fontSize: amountFontSize,
                 lineHeight: '1.05',
               }}
-              className={`font-num bg-transparent text-center font-semibold tracking-tight focus:outline-none ${
+              className={`font-num bg-transparent text-center font-semibold tracking-[0.04em] focus:outline-none ${
                 insufficientBalance ? 'text-[#ff6b7a]' : amountInput.trim() ? 'text-white' : 'text-gray-500'
               }`}
             />
