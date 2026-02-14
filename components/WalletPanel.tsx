@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
   getIdentityToken,
@@ -403,6 +403,13 @@ export function WalletPanel() {
       transport: http(),
     });
   }, [config.sourceChain]);
+  const identityTokenRef = useRef<string | null>(identityToken ?? null);
+  const didInitialClaimableLoadRef = useRef(false);
+
+  useEffect(() => {
+    identityTokenRef.current = identityToken ?? null;
+  }, [identityToken]);
+
   const getAuthToken = useCallback(async () => {
     let freshToken: string | null = null;
     try {
@@ -410,12 +417,12 @@ export function WalletPanel() {
     } catch {
       freshToken = null;
     }
-    const token = freshToken ?? identityToken;
+    const token = freshToken ?? identityTokenRef.current;
     if (!token) {
       throw new Error('Missing identity token. Please re-login.');
     }
     return token;
-  }, [identityToken]);
+  }, []);
 
   const [amountMode] = useState<AmountMode>('receive');
   const [amountInput, setAmountInput] = useState('');
@@ -435,6 +442,9 @@ export function WalletPanel() {
   const [claimablePayoutsError, setClaimablePayoutsError] = useState<string | null>(null);
   const [claimingPayoutId, setClaimingPayoutId] = useState<string | null>(null);
   const [selectedPayout, setSelectedPayout] = useState<PayoutPreview | null>(null);
+  const [claimablePayoutsScrolling, setClaimablePayoutsScrolling] = useState(false);
+  const claimableScrollTimeoutRef = useRef<number | null>(null);
+  const claimableScrollArmedRef = useRef(false);
 
   const pushDebug = useCallback(
     (stage: string, message: string, data?: Record<string, unknown>) => {
@@ -1210,7 +1220,9 @@ export function WalletPanel() {
 
   const loadClaimablePayouts = useCallback(
     async (mode: 'initial' | 'background' = 'background') => {
-      if (mode === 'initial') setClaimablePayoutsLoading(true);
+      const shouldShowLoading =
+        mode === 'initial' && !didInitialClaimableLoadRef.current && claimablePayouts.length === 0;
+      if (shouldShowLoading) setClaimablePayoutsLoading(true);
       setClaimablePayoutsError(null);
       try {
         const token = await getAuthToken();
@@ -1219,15 +1231,16 @@ export function WalletPanel() {
           .filter((item) => item.status === 'CREATED')
           .sort((a, b) => a.expires_at - b.expires_at);
         setClaimablePayouts(claimable);
+        didInitialClaimableLoadRef.current = true;
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'Failed to load claimable payouts';
         setClaimablePayoutsError(message);
       } finally {
-        if (mode === 'initial') setClaimablePayoutsLoading(false);
+        if (shouldShowLoading) setClaimablePayoutsLoading(false);
       }
     },
-    [getAuthToken]
+    [claimablePayouts.length, getAuthToken]
   );
 
   const handleClaimablePayoutClaim = useCallback(
@@ -1273,12 +1286,41 @@ export function WalletPanel() {
 
   useEffect(() => {
     if (withdrawOpen) return;
-    void loadClaimablePayouts('initial');
+    void loadClaimablePayouts(didInitialClaimableLoadRef.current ? 'background' : 'initial');
     const timerId = window.setInterval(() => {
       void loadClaimablePayouts('background');
     }, 20_000);
     return () => window.clearInterval(timerId);
   }, [loadClaimablePayouts, withdrawOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (claimableScrollTimeoutRef.current) {
+        window.clearTimeout(claimableScrollTimeoutRef.current);
+      }
+      claimableScrollArmedRef.current = false;
+    };
+  }, []);
+
+  const markClaimablePayoutsScrolling = useCallback(() => {
+    setClaimablePayoutsScrolling(true);
+    if (claimableScrollTimeoutRef.current) {
+      window.clearTimeout(claimableScrollTimeoutRef.current);
+    }
+    claimableScrollTimeoutRef.current = window.setTimeout(() => {
+      setClaimablePayoutsScrolling(false);
+      claimableScrollArmedRef.current = false;
+    }, 1100);
+  }, []);
+
+  const armClaimablePayoutsScroll = useCallback(() => {
+    claimableScrollArmedRef.current = true;
+  }, []);
+
+  const handleClaimablePayoutsScroll = useCallback(() => {
+    if (!claimableScrollArmedRef.current) return;
+    markClaimablePayoutsScrolling();
+  }, [markClaimablePayoutsScrolling]);
 
   if (withdrawOpen) {
     const headerTitle = step === 4 ? 'Review' : 'Send';
@@ -1526,7 +1568,18 @@ export function WalletPanel() {
             <p className="mb-2 text-xs text-red-400">{claimablePayoutsError}</p>
           )}
 
-          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          <div
+            onWheel={() => {
+              armClaimablePayoutsScroll();
+              markClaimablePayoutsScrolling();
+            }}
+            onTouchStart={armClaimablePayoutsScroll}
+            onTouchMove={armClaimablePayoutsScroll}
+            onScroll={handleClaimablePayoutsScroll}
+            className={`min-h-0 flex-1 pr-1 transient-scrollbar ${
+              claimablePayoutsScrolling ? 'transient-scrollbar--visible' : ''
+            }`}
+          >
             {claimablePayoutsLoading ? (
               <p className="text-sm text-gray-400">Loading payouts...</p>
             ) : claimablePayouts.length === 0 ? (

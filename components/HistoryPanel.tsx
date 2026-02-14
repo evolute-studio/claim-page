@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { getIdentityToken, useIdentityToken, useWallets } from '@privy-io/react-auth';
+import { RotateCw } from 'lucide-react';
 import {
   confirmClaim,
   confirmClaimByPayoutId,
@@ -17,6 +18,9 @@ import type { PayoutPreview } from '@/types/payout';
 import type { DestinationChain, WithdrawalListItem } from '@/types/withdrawal';
 
 type HistoryView = 'incomes' | 'outcomes';
+type LoadHistoryOptions = {
+  showRefreshIndicator?: boolean;
+};
 type HistorySelected =
   | { kind: 'income'; item: PayoutPreview }
   | { kind: 'outcome'; item: WithdrawalListItem };
@@ -103,6 +107,7 @@ export function HistoryPanel({ focusToken }: { focusToken?: string | null }) {
   const [view, setView] = useState<HistoryView>('incomes');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshIconSpinning, setRefreshIconSpinning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [payouts, setPayouts] = useState<PayoutPreview[]>([]);
   const [withdrawals, setWithdrawals] = useState<WithdrawalListItem[]>([]);
@@ -112,6 +117,19 @@ export function HistoryPanel({ focusToken }: { focusToken?: string | null }) {
   const [outcomesScrolling, setOutcomesScrolling] = useState(false);
   const incomesScrollTimeoutRef = useRef<number | null>(null);
   const outcomesScrollTimeoutRef = useRef<number | null>(null);
+  const incomesScrollArmedRef = useRef(false);
+  const outcomesScrollArmedRef = useRef(false);
+  const identityTokenRef = useRef<string | null>(identityToken ?? null);
+  const didInitialLoadRef = useRef(false);
+  const incomesListRef = useRef<HTMLDivElement | null>(null);
+  const outcomesListRef = useRef<HTMLDivElement | null>(null);
+  const pendingScrollRestoreRef = useRef<{ incomes: number; outcomes: number } | null>(null);
+  const refreshSpinHasFullTurnRef = useRef(false);
+  const refreshSpinStopRequestedRef = useRef(false);
+
+  useEffect(() => {
+    identityTokenRef.current = identityToken ?? null;
+  }, [identityToken]);
 
   const getAuthToken = useCallback(async () => {
     let freshToken: string | null = null;
@@ -120,18 +138,23 @@ export function HistoryPanel({ focusToken }: { focusToken?: string | null }) {
     } catch {
       freshToken = null;
     }
-    const token = freshToken ?? identityToken;
+    const token = freshToken ?? identityTokenRef.current;
     if (!token) throw new Error('Missing identity token. Please re-login.');
     return token;
-  }, [identityToken]);
+  }, []);
 
   const loadHistory = useCallback(
-    async (mode: 'initial' | 'background' = 'background') => {
+    async (mode: 'initial' | 'background' = 'background', options: LoadHistoryOptions = {}) => {
+      const showRefreshIndicator = options.showRefreshIndicator ?? false;
       if (mode === 'initial') {
         setLoading(true);
         setError(null);
-      } else {
+      } else if (showRefreshIndicator) {
         setRefreshing(true);
+        pendingScrollRestoreRef.current = {
+          incomes: incomesListRef.current?.scrollTop ?? 0,
+          outcomes: outcomesListRef.current?.scrollTop ?? 0,
+        };
       }
       try {
         const token = await getAuthToken();
@@ -157,7 +180,7 @@ export function HistoryPanel({ focusToken }: { focusToken?: string | null }) {
       } finally {
         if (mode === 'initial') {
           setLoading(false);
-        } else {
+        } else if (showRefreshIndicator) {
           setRefreshing(false);
         }
       }
@@ -166,28 +189,27 @@ export function HistoryPanel({ focusToken }: { focusToken?: string | null }) {
   );
 
   useEffect(() => {
+    if (didInitialLoadRef.current) return;
+    didInitialLoadRef.current = true;
     void loadHistory('initial');
   }, [loadHistory]);
 
   useEffect(() => {
     if (loading) return;
-    const hasInFlightIncome = payouts.some(
-      (item) => item.status === 'PENDING_APPROVAL' || item.status === 'PAYING'
-    );
-    const hasInFlightOutcome = withdrawals.some(
-      (item) =>
-        item.status === 'CREATED' ||
-        item.status === 'BURN_SUBMITTED' ||
-        item.status === 'FORWARDING_PENDING'
-    );
-    if (!hasInFlightIncome && !hasInFlightOutcome) return;
-
     const timerId = window.setInterval(() => {
       void loadHistory('background');
-    }, 30_000);
+    }, 12_000);
 
     return () => window.clearInterval(timerId);
-  }, [loading, loadHistory, payouts, withdrawals]);
+  }, [loading, loadHistory]);
+
+  useLayoutEffect(() => {
+    const pending = pendingScrollRestoreRef.current;
+    if (!pending) return;
+    if (incomesListRef.current) incomesListRef.current.scrollTop = pending.incomes;
+    if (outcomesListRef.current) outcomesListRef.current.scrollTop = pending.outcomes;
+    pendingScrollRestoreRef.current = null;
+  }, [payouts, withdrawals]);
 
   const incomes = useMemo(
     () =>
@@ -266,7 +288,8 @@ export function HistoryPanel({ focusToken }: { focusToken?: string | null }) {
       }
       incomesScrollTimeoutRef.current = window.setTimeout(() => {
         setIncomesScrolling(false);
-      }, 550);
+        incomesScrollArmedRef.current = false;
+      }, 1100);
       return;
     }
 
@@ -276,8 +299,26 @@ export function HistoryPanel({ focusToken }: { focusToken?: string | null }) {
     }
     outcomesScrollTimeoutRef.current = window.setTimeout(() => {
       setOutcomesScrolling(false);
-    }, 550);
+      outcomesScrollArmedRef.current = false;
+    }, 1100);
   }, []);
+
+  const armListScroll = useCallback((kind: HistoryView) => {
+    if (kind === 'incomes') {
+      incomesScrollArmedRef.current = true;
+      return;
+    }
+    outcomesScrollArmedRef.current = true;
+  }, []);
+
+  const handleListScroll = useCallback(
+    (kind: HistoryView) => {
+      const armed = kind === 'incomes' ? incomesScrollArmedRef.current : outcomesScrollArmedRef.current;
+      if (!armed) return;
+      markListScrolling(kind);
+    },
+    [markListScrolling]
+  );
 
   useEffect(() => {
     return () => {
@@ -287,8 +328,37 @@ export function HistoryPanel({ focusToken }: { focusToken?: string | null }) {
       if (outcomesScrollTimeoutRef.current) {
         window.clearTimeout(outcomesScrollTimeoutRef.current);
       }
+      incomesScrollArmedRef.current = false;
+      outcomesScrollArmedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (refreshing) {
+      refreshSpinStopRequestedRef.current = false;
+      refreshSpinHasFullTurnRef.current = false;
+      setRefreshIconSpinning(true);
+      return;
+    }
+
+    if (refreshIconSpinning) {
+      refreshSpinStopRequestedRef.current = true;
+    }
+  }, [refreshing, refreshIconSpinning]);
+
+  const handleRefreshSpinIteration = useCallback(() => {
+    refreshSpinHasFullTurnRef.current = true;
+    if (!refreshSpinStopRequestedRef.current) return;
+
+    refreshSpinStopRequestedRef.current = false;
+    refreshSpinHasFullTurnRef.current = false;
+    setRefreshIconSpinning(false);
+  }, []);
+
+  const handleManualRefresh = useCallback(() => {
+    if (refreshing || refreshIconSpinning) return;
+    void loadHistory('background', { showRefreshIndicator: true });
+  }, [loadHistory, refreshIconSpinning, refreshing]);
 
   return (
     <section className="flex h-full min-h-0 w-full flex-col gap-4 rounded-2xl border border-white/10 bg-[#111111] p-5 animate-fade-in-up">
@@ -296,10 +366,18 @@ export function HistoryPanel({ focusToken }: { focusToken?: string | null }) {
         <h2 className="text-lg font-semibold text-white">History</h2>
         <button
           type="button"
-          onClick={() => void loadHistory('background')}
-          className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs text-gray-100 transition hover:bg-white/10"
+          onClick={handleManualRefresh}
+          disabled={refreshing || refreshIconSpinning}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70"
+          aria-label="Refresh history"
+          title="Refresh history"
         >
-          {refreshing ? 'Refreshing...' : 'Refresh'}
+          <span
+            onAnimationIteration={handleRefreshSpinIteration}
+            className={refreshIconSpinning ? 'animate-history-refresh-spin' : ''}
+          >
+            <RotateCw className="h-4 w-4" />
+          </span>
         </button>
       </div>
 
@@ -350,7 +428,14 @@ export function HistoryPanel({ focusToken }: { focusToken?: string | null }) {
                 <p className="text-sm text-gray-400">No incomes found.</p>
               ) : (
                 <div
-                  onScroll={() => markListScrolling('incomes')}
+                  ref={incomesListRef}
+                  onWheel={() => {
+                    armListScroll('incomes');
+                    markListScrolling('incomes');
+                  }}
+                  onTouchStart={() => armListScroll('incomes')}
+                  onTouchMove={() => armListScroll('incomes')}
+                  onScroll={() => handleListScroll('incomes')}
                   className={`min-h-0 h-full space-y-3 pr-1 transient-scrollbar ${
                     incomesScrolling && view === 'incomes' ? 'transient-scrollbar--visible' : ''
                   }`}
@@ -399,7 +484,14 @@ export function HistoryPanel({ focusToken }: { focusToken?: string | null }) {
                 <p className="text-sm text-gray-400">No outcomes found.</p>
               ) : (
                 <div
-                  onScroll={() => markListScrolling('outcomes')}
+                  ref={outcomesListRef}
+                  onWheel={() => {
+                    armListScroll('outcomes');
+                    markListScrolling('outcomes');
+                  }}
+                  onTouchStart={() => armListScroll('outcomes')}
+                  onTouchMove={() => armListScroll('outcomes')}
+                  onScroll={() => handleListScroll('outcomes')}
                   className={`min-h-0 h-full space-y-3 pr-1 transient-scrollbar ${
                     outcomesScrolling && view === 'outcomes' ? 'transient-scrollbar--visible' : ''
                   }`}

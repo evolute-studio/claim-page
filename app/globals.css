@@ -74,6 +74,15 @@ body {
   }
 }
 
+@keyframes historyRefreshSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .animate-slide-in {
   animation: slideIn 180ms ease-out;
 }
@@ -107,6 +116,12 @@ body {
 
 .animate-history-view-slide-right {
   animation: historyViewSlideRight 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.animate-history-refresh-spin {
+  display: inline-flex;
+  transform-origin: center;
+  animation: historyRefreshSpin 800ms linear infinite;
 }
 
 .transient-scrollbar {
@@ -145,7 +160,8 @@ body {
   .animate-sheet-in,
   .animate-history-view-in,
   .animate-history-view-slide-left,
-  .animate-history-view-slide-right {
+  .animate-history-view-slide-right,
+  .animate-history-refresh-spin {
     animation: none;
   }
 }

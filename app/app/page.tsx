@@ -239,15 +239,13 @@ export default function AppPage() {
           )}
         </header>
 
-        <div
-          key={activeTab}
-          className="min-h-0 flex-1 overflow-y-auto pb-[calc(7rem+env(safe-area-inset-bottom))] pr-1 animate-fade-in-up"
-        >
-          {activeTab === 'wallet' ? (
+        <div className="min-h-0 flex-1 overflow-hidden pb-[calc(7rem+env(safe-area-inset-bottom))] pr-1">
+          <div className={activeTab === 'wallet' ? 'block h-full min-h-0 animate-fade-in-up' : 'hidden'}>
             <WalletPanel />
-          ) : (
+          </div>
+          <div className={activeTab === 'history' ? 'block h-full min-h-0 animate-fade-in-up' : 'hidden'}>
             <HistoryPanel focusToken={focusToken ?? queryFocusToken} />
-          )}
+          </div>
         </div>
       </div>
 
