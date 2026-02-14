@@ -1,3 +1,4 @@
+import type { ComponentType } from 'react';
 import { Clipboard } from 'lucide-react';
 import { formatUsdc } from '@/lib/withdraw';
 import { truncateAddress } from '@/lib/format';
@@ -6,6 +7,12 @@ import type { DestinationChain, WithdrawalQuoteResponse, WithdrawalStatus } from
 type DestinationConfig = {
   label: string;
   explorerTxBase: string;
+};
+
+type NetworkIconProps = {
+  chainKey: DestinationChain;
+  chainName: string;
+  size?: number;
 };
 
 type WithdrawStepReviewProps = {
@@ -24,6 +31,7 @@ type WithdrawStepReviewProps = {
   quoteTimeRemaining: string;
   destinationConfig?: DestinationConfig;
   destination: DestinationChain;
+  NetworkIcon?: ComponentType<NetworkIconProps>;
   quoteLoading: boolean;
   displayQuote: WithdrawalQuoteResponse | null;
   quoteError: string | null;
@@ -61,6 +69,7 @@ export function WithdrawStepReview({
   quoteTimeRemaining,
   destinationConfig,
   destination,
+  NetworkIcon,
   quoteLoading,
   displayQuote,
   quoteError,
@@ -147,7 +156,16 @@ export function WithdrawStepReview({
           <div className="space-y-2.5 text-[17px] text-gray-300">
             <div className="flex items-center justify-between">
               <span className="text-gray-400">Network</span>
-              <span className="font-num text-right text-white">{destinationConfig?.label ?? destination}</span>
+              <span className="font-num inline-flex items-center justify-end gap-2 text-right text-white">
+                {NetworkIcon ? (
+                  <NetworkIcon
+                    chainKey={destination}
+                    chainName={destinationConfig?.label ?? destination}
+                    size={24}
+                  />
+                ) : null}
+                <span>{destinationConfig?.label ?? destination}</span>
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-gray-400">To</span>

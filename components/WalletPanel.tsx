@@ -265,6 +265,7 @@ function NetworkIcon({
   }, [logoUrl]);
 
   const iconSize = Math.max(10, Math.round(size * 0.66));
+  const iconRadius = Math.max(4, Math.min(12, Math.round(size * 0.27)));
   const logoClass =
     chainKey === 'ethereum'
       ? 'h-full w-full object-contain object-center'
@@ -272,8 +273,16 @@ function NetworkIcon({
 
   return (
     <span
-      className="relative inline-flex aspect-square flex-none items-center justify-center overflow-hidden rounded-[12px] border border-transparent bg-transparent"
-      style={{ width: size, minWidth: size, maxWidth: size, height: size, minHeight: size, maxHeight: size }}
+      className="relative inline-flex aspect-square flex-none items-center justify-center overflow-hidden border border-transparent bg-transparent"
+      style={{
+        width: size,
+        minWidth: size,
+        maxWidth: size,
+        height: size,
+        minHeight: size,
+        maxHeight: size,
+        borderRadius: `${iconRadius}px`,
+      }}
       aria-hidden="true"
     >
       {logoUrl && !logoLoadFailed ? (
@@ -1367,6 +1376,7 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
                 quoteTimeRemaining={quoteTimeRemaining}
                 destinationConfig={destinationConfig}
                 destination={destination}
+                NetworkIcon={NetworkIcon}
                 quoteLoading={quoteLoading}
                 displayQuote={displayQuote}
                 quoteError={quoteError}
