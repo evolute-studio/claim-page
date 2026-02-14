@@ -392,7 +392,7 @@ function NetworkIcon({ chainName, size = 16 }: { chainName: string; size?: numbe
 type AmountMode = 'receive' | 'pay';
 type WithdrawStep = 1 | 2 | 4;
 
-export function WalletPanel() {
+export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
   const { wallets } = useWallets();
   const { identityToken } = useIdentityToken();
   const { sendTransaction } = useSendTransaction();
@@ -1586,25 +1586,32 @@ export function WalletPanel() {
               <p className="text-sm text-gray-500">No claimable payouts.</p>
             ) : (
               <div className="space-y-3 pb-2">
-                {claimablePayouts.map((item) => {
+                {claimablePayouts.map((item, index) => {
                   const key =
                     item.id ?? item.payout_id ?? item.claim_token ?? `${item.status}-${item.expires_at}`;
                   const hasClaimRef = !!item.claim_token || !!item.payout_id || !!item.id;
                   const canClaim = item.status === 'CREATED' && hasClaimRef && !!activeWalletAddress;
                   const isClaiming = claimingPayoutId === key;
                   return (
-                    <PayoutListCard
+                    <div
                       key={key}
-                      item={item}
-                      amountLabel={formatClaimablePillAmount(item)}
-                      sourceLabel="Tournament reward"
-                      showStatus={false}
-                      variant="wallet"
-                      onDetails={() => setSelectedPayout(item)}
-                      canClaim={canClaim}
-                      isClaiming={isClaiming}
-                      onClaim={() => void handleClaimablePayoutClaim(item)}
-                    />
+                      className={`transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+                        isActive ? 'translate-x-0 opacity-100 brightness-100' : '-translate-x-8 opacity-35 brightness-50'
+                      }`}
+                      style={{ transitionDelay: `${Math.min(index * 45, 360)}ms` }}
+                    >
+                      <PayoutListCard
+                        item={item}
+                        amountLabel={formatClaimablePillAmount(item)}
+                        sourceLabel="Tournament reward"
+                        showStatus={false}
+                        variant="wallet"
+                        onDetails={() => setSelectedPayout(item)}
+                        canClaim={canClaim}
+                        isClaiming={isClaiming}
+                        onClaim={() => void handleClaimablePayoutClaim(item)}
+                      />
+                    </div>
                   );
                 })}
               </div>

@@ -240,11 +240,24 @@ export default function AppPage() {
         </header>
 
         <div className="min-h-0 flex-1 overflow-hidden pb-[calc(7rem+env(safe-area-inset-bottom))] pr-1">
-          <div className={activeTab === 'wallet' ? 'block h-full min-h-0 animate-fade-in-up' : 'hidden'}>
-            <WalletPanel />
-          </div>
-          <div className={activeTab === 'history' ? 'block h-full min-h-0 animate-fade-in-up' : 'hidden'}>
-            <HistoryPanel focusToken={focusToken ?? queryFocusToken} />
+          <div
+            className="flex h-full w-[200%] transition-[margin-left] duration-[600ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+            style={{ marginLeft: activeTab === 'history' ? '-100%' : '0%' }}
+          >
+            <div
+              className={`h-full min-h-0 w-1/2 pr-1 ${
+                activeTab === 'wallet' ? 'pointer-events-auto' : 'pointer-events-none'
+              }`}
+            >
+              <WalletPanel isActive={activeTab === 'wallet'} />
+            </div>
+            <div
+              className={`h-full min-h-0 w-1/2 pl-1 ${
+                activeTab === 'history' ? 'pointer-events-auto' : 'pointer-events-none'
+              }`}
+            >
+              <HistoryPanel focusToken={focusToken ?? queryFocusToken} />
+            </div>
           </div>
         </div>
       </div>
@@ -253,14 +266,18 @@ export default function AppPage() {
         className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-[#0a0a0a] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3"
         aria-label="Primary"
       >
-        <div className="mx-auto flex w-full max-w-md items-center gap-2 rounded-2xl border border-white/10 bg-[#111111] p-1.5">
+        <div className="relative mx-auto flex w-full max-w-md items-center gap-2 rounded-2xl border border-white/10 bg-[#111111] p-1.5">
+          <span
+            className={`pointer-events-none absolute inset-y-1.5 left-1.5 w-[calc(50%-0.375rem)] rounded-xl bg-white/10 transition-transform duration-300 ease-out ${
+              activeTab === 'history' ? 'translate-x-full' : 'translate-x-0'
+            }`}
+            aria-hidden="true"
+          />
           <button
             type="button"
             onClick={() => handleTabChange('wallet')}
-            className={`flex h-12 flex-1 items-center justify-center gap-2 rounded-xl text-sm font-medium transition ${
-              activeTab === 'wallet'
-                ? 'bg-white/10 text-white'
-                : 'text-gray-300 hover:bg-white/5'
+            className={`relative z-10 flex h-12 flex-1 items-center justify-center gap-2 rounded-xl text-sm font-medium transition ${
+              activeTab === 'wallet' ? 'text-white' : 'text-gray-300 hover:bg-white/5'
             }`}
           >
             <WalletIcon active={activeTab === 'wallet'} />
@@ -269,10 +286,8 @@ export default function AppPage() {
           <button
             type="button"
             onClick={() => handleTabChange('history')}
-            className={`flex h-12 flex-1 items-center justify-center gap-2 rounded-xl text-sm font-medium transition ${
-              activeTab === 'history'
-                ? 'bg-white/10 text-white'
-                : 'text-gray-300 hover:bg-white/5'
+            className={`relative z-10 flex h-12 flex-1 items-center justify-center gap-2 rounded-xl text-sm font-medium transition ${
+              activeTab === 'history' ? 'text-white' : 'text-gray-300 hover:bg-white/5'
             }`}
           >
             <HistoryIcon active={activeTab === 'history'} />
