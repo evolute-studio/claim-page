@@ -98,7 +98,13 @@ function CloseIcon({ size = 18 }: { size?: number }) {
   );
 }
 
-export function HistoryPanel({ focusToken }: { focusToken?: string | null }) {
+export function HistoryPanel({
+  focusToken,
+  isActive = true,
+}: {
+  focusToken?: string | null;
+  isActive?: boolean;
+}) {
   const { identityToken } = useIdentityToken();
   const { wallets } = useWallets();
   const walletAddress = wallets[0]?.address;
@@ -362,7 +368,12 @@ export function HistoryPanel({ focusToken }: { focusToken?: string | null }) {
 
   return (
     <section className="flex h-full min-h-0 w-full flex-col gap-4 rounded-2xl border border-white/10 bg-[#111111] p-5 animate-fade-in-up">
-      <div className="flex items-center justify-between gap-3">
+      <div
+        className={`flex items-center justify-between gap-3 transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+          isActive ? 'translate-x-0 opacity-100 brightness-100' : 'translate-x-8 opacity-35 brightness-50'
+        }`}
+        style={{ transitionDelay: '0ms' }}
+      >
         <h2 className="text-lg font-semibold text-white">History</h2>
         <button
           type="button"
@@ -381,7 +392,12 @@ export function HistoryPanel({ focusToken }: { focusToken?: string | null }) {
         </button>
       </div>
 
-      <div className="relative flex items-center rounded-xl border border-white/10 bg-black/35 p-1">
+      <div
+        className={`relative flex items-center rounded-xl border border-white/10 bg-black/35 p-1 transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+          isActive ? 'translate-x-0 opacity-100 brightness-100' : 'translate-x-8 opacity-35 brightness-50'
+        }`}
+        style={{ transitionDelay: '80ms' }}
+      >
         <span
           className={`pointer-events-none absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-lg bg-white/10 transition-transform duration-300 ease-out ${
             view === 'outcomes' ? 'translate-x-full' : 'translate-x-0'
@@ -409,15 +425,32 @@ export function HistoryPanel({ focusToken }: { focusToken?: string | null }) {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+        <div
+          className={`rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300 transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            isActive ? 'translate-x-0 opacity-100 brightness-100' : 'translate-x-8 opacity-35 brightness-50'
+          }`}
+          style={{ transitionDelay: '120ms' }}
+        >
           {error}
         </div>
       )}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading history...</p>
+        <p
+          className={`text-sm text-gray-400 transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            isActive ? 'translate-x-0 opacity-100 brightness-100' : 'translate-x-8 opacity-35 brightness-50'
+          }`}
+          style={{ transitionDelay: '160ms' }}
+        >
+          Loading history...
+        </p>
       ) : (
-        <div className="min-h-0 flex-1 overflow-hidden">
+        <div
+          className={`min-h-0 flex-1 overflow-hidden transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            isActive ? 'translate-x-0 opacity-100 brightness-100' : 'translate-x-8 opacity-35 brightness-50'
+          }`}
+          style={{ transitionDelay: '160ms' }}
+        >
           <div
             className={`flex h-full w-[200%] transition-transform duration-[600ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
               view === 'outcomes' ? '-translate-x-1/2' : 'translate-x-0'

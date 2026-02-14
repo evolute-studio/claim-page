@@ -1523,7 +1523,12 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
 
   return (
     <aside className="flex h-full min-h-0 w-full flex-col animate-fade-in-up pt-8">
-      <div className="px-1 text-center">
+      <div
+        className={`px-1 text-center transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+          isActive ? 'translate-x-0 opacity-100 brightness-100' : '-translate-x-8 opacity-35 brightness-50'
+        }`}
+        style={{ transitionDelay: '0ms' }}
+      >
         <p className="font-num text-base uppercase tracking-[0.14em] text-gray-500">Your balance</p>
         {formattedBalance ? (
           <p className="font-num mt-4 text-5xl font-semibold leading-none tracking-[0.04em] text-white">
@@ -1547,19 +1552,31 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
       )}
 
       {!withdrawOpen ? (
-        <button
-          type="button"
-          onClick={handleOpenWithdraw}
-          disabled={!activeWalletAddress || config.errors.length > 0}
-          className="interactive-fx no-shimmer mt-14 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-3 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:bg-white/10 disabled:text-white/40"
+        <div
+          className={`mt-14 transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            isActive ? 'translate-x-0 opacity-100 brightness-100' : '-translate-x-8 opacity-35 brightness-50'
+          }`}
+          style={{ transitionDelay: '80ms' }}
         >
-          <SendIcon />
-          <span className="font-num tracking-[0.04em]">Send</span>
-        </button>
+          <button
+            type="button"
+            onClick={handleOpenWithdraw}
+            disabled={!activeWalletAddress || config.errors.length > 0}
+            className="interactive-fx no-shimmer inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-3 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:bg-white/10 disabled:text-white/40"
+          >
+            <SendIcon />
+            <span className="font-num tracking-[0.04em]">Send</span>
+          </button>
+        </div>
       ) : null}
 
       {!withdrawOpen && (
-        <div className="mt-6 flex min-h-0 flex-1 flex-col">
+        <div
+          className={`mt-6 flex min-h-0 flex-1 flex-col transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            isActive ? 'translate-x-0 opacity-100 brightness-100' : '-translate-x-8 opacity-35 brightness-50'
+          }`}
+          style={{ transitionDelay: '140ms' }}
+        >
           <div className="mb-2">
             <p className="text-xs uppercase tracking-[0.14em] text-gray-500">Claimable payouts</p>
           </div>

@@ -256,7 +256,7 @@ export default function AppPage() {
                 activeTab === 'history' ? 'pointer-events-auto' : 'pointer-events-none'
               }`}
             >
-              <HistoryPanel focusToken={focusToken ?? queryFocusToken} />
+              <HistoryPanel focusToken={focusToken ?? queryFocusToken} isActive={activeTab === 'history'} />
             </div>
           </div>
         </div>
