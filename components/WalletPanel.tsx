@@ -742,7 +742,7 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
     if (Number.isNaN(numeric)) return balance;
     return new Intl.NumberFormat(undefined, {
       minimumFractionDigits: 2,
-      maximumFractionDigits: 4,
+      maximumFractionDigits: 2,
     }).format(numeric);
   }, [balance]);
   const availabilityFeeMinor = useMemo(() => {
@@ -1532,7 +1532,7 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
         <p className="font-num text-base uppercase tracking-[0.14em] text-gray-500">Your balance</p>
         {formattedBalance ? (
           <p className="font-num mt-4 text-5xl font-semibold leading-none tracking-[0.04em] text-white">
-            {formattedBalance} <span className="text-gray-400">USDC</span>
+            ~{formattedBalance} <span className="text-gray-400">USDC</span>
           </p>
         ) : balanceError ? (
           <p className="mt-2 text-sm text-red-400">{balanceError}</p>
@@ -1540,7 +1540,7 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
           <p className="mt-2 text-sm text-gray-400">Loading...</p>
         ) : (
           <p className="font-num mt-4 text-5xl font-semibold leading-none tracking-[0.04em] text-white">
-            0.00 <span className="text-gray-400">USDC</span>
+            ~0.00 <span className="text-gray-400">USDC</span>
           </p>
         )}
       </div>
@@ -1649,7 +1649,7 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
                     return (
                       <>
                         {amountPart}
-                        {assetPart ? <span className="ml-1 text-gray-500">{assetPart}</span> : null}
+                        {assetPart ? <span className="ml-1 text-gray-400">{assetPart}</span> : null}
                       </>
                     );
                   })()}

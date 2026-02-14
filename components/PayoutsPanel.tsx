@@ -295,7 +295,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
                     return (
                       <>
                         {amountPart}
-                        {assetPart ? <span className="ml-1 text-gray-500">{assetPart}</span> : null}
+                        {assetPart ? <span className="ml-1 text-gray-400">{assetPart}</span> : null}
                       </>
                     );
                   })()}

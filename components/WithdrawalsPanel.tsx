@@ -212,7 +212,7 @@ export function WithdrawalsPanel() {
                 <h3 className="text-lg font-semibold text-white">Withdrawal details</h3>
                 <p className="font-num text-sm text-gray-400">
                   {formatUsdc(selected.transfer_amount_usdc_minor)}{' '}
-                  <span className="text-gray-500">USDC</span>
+                  <span className="text-gray-400">USDC</span>
                 </p>
               </div>
               <button

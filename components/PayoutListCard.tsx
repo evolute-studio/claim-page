@@ -74,7 +74,7 @@ export function PayoutListCard({
             }`}
           >
             {amountPart}
-            {assetPart ? <span className="ml-1 text-gray-300">{assetPart}</span> : null}
+            {assetPart ? <span className="ml-1 text-gray-400">{assetPart}</span> : null}
           </p>
           {secondaryMeta ? (
             <p className="truncate text-xs leading-4 text-gray-500">

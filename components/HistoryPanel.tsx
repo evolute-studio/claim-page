@@ -581,7 +581,7 @@ export function HistoryPanel({
                 <h3 className="text-lg font-semibold text-white">Income details</h3>
                 <p className="text-sm text-gray-300">
                   {formatUsdc(selected.item.amount_minor_units)}{' '}
-                  <span className="text-gray-500">USDC</span>
+                  <span className="text-gray-400">USDC</span>
                 </p>
               </div>
               <button
@@ -686,7 +686,7 @@ export function HistoryPanel({
                 <h3 className="text-lg font-semibold text-white">Outcome details</h3>
                 <p className="font-num text-sm text-gray-300">
                   {formatUsdc(selected.item.transfer_amount_usdc_minor)}{' '}
-                  <span className="text-gray-500">USDC</span>
+                  <span className="text-gray-400">USDC</span>
                 </p>
               </div>
               <button
