@@ -15,6 +15,7 @@ type DebugLogger = (stage: string, message: string, data?: Record<string, unknow
 type UseNetworkFeeEstimatesParams = {
   withdrawOpen: boolean;
   step: number;
+  prefetchWhenClosed?: boolean;
   destinationChains: DestinationChainOption[];
   getAuthToken: () => Promise<string>;
   fetchFeeQuote: (token: string, chain: DestinationChain) => Promise<number>;
@@ -22,9 +23,14 @@ type UseNetworkFeeEstimatesParams = {
   pushDebug?: DebugLogger;
 };
 
+type FeeEstimateResult =
+  | { chain: DestinationChain; fee: number }
+  | { chain: DestinationChain; error: string };
+
 export function useNetworkFeeEstimates({
   withdrawOpen,
   step,
+  prefetchWhenClosed = false,
   destinationChains,
   getAuthToken,
   fetchFeeQuote,
@@ -56,15 +62,22 @@ export function useNetworkFeeEstimates({
   }, []);
 
   useEffect(() => {
-    if (!withdrawOpen || step !== 1) return;
+    const shouldFetchEstimates =
+      (withdrawOpen && step === 1) || (!withdrawOpen && prefetchWhenClosed);
+    if (!shouldFetchEstimates) return;
+
     const missingOptions = destinationChains.filter(
       (option) => networkFeeEstimates[option.key] === undefined
     );
     if (missingOptions.length === 0) return;
     if (inFlightRef.current) return;
 
+    const hasFeeCache = destinationChains.some(
+      (option) => option.key !== 'base' && networkFeeEstimates[option.key] !== undefined
+    );
+
     const now = Date.now();
-    if (retryAllowedAtRef.current > now) {
+    if (retryAllowedAtRef.current > now && hasFeeCache) {
       if (!retryTimerRef.current) {
         retryTimerRef.current = window.setTimeout(() => {
           retryTimerRef.current = null;
@@ -96,25 +109,36 @@ export function useNetworkFeeEstimates({
         const estimateMap: Partial<Record<DestinationChain, number>> = {};
         const failedChains: string[] = [];
         const failedReasons: Record<string, string> = {};
+        const results = await Promise.all<FeeEstimateResult>(
+          missingOptions.map(async (option) => {
+            if (option.key === 'base') {
+              return { chain: option.key, fee: 0 };
+            }
+            try {
+              const fee = await withTimeout(
+                fetchFeeQuote(token, option.key),
+                15_000,
+                `Fee quote ${option.key}`
+              );
+              return { chain: option.key, fee };
+            } catch (error) {
+              return {
+                chain: option.key,
+                error: error instanceof Error ? error.message : 'Unknown error',
+              };
+            }
+          })
+        );
 
-        for (const option of missingOptions) {
-          if (option.key === 'base') {
-            estimateMap[option.key] = 0;
+        if (cancelled || requestIdRef.current !== requestId) return;
+
+        for (const result of results) {
+          if ('fee' in result) {
+            estimateMap[result.chain] = result.fee;
             continue;
           }
-          try {
-            const fee = await withTimeout(
-              fetchFeeQuote(token, option.key),
-              15_000,
-              `Fee quote ${option.key}`
-            );
-            estimateMap[option.key] = fee;
-          } catch (error) {
-            failedChains.push(option.key);
-            failedReasons[option.key] =
-              error instanceof Error ? error.message : 'Unknown error';
-          }
-          if (cancelled || requestIdRef.current !== requestId) return;
+          failedChains.push(result.chain);
+          failedReasons[result.chain] = result.error;
         }
 
         if (Object.keys(estimateMap).length > 0) {
@@ -201,6 +225,7 @@ export function useNetworkFeeEstimates({
     getAuthToken,
     networkFeeEstimates,
     networkFeeRetryNonce,
+    prefetchWhenClosed,
     pushDebug,
     step,
     withdrawOpen,

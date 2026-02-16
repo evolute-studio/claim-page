@@ -60,10 +60,10 @@ export function PayoutListCard({
     <div
       className={`overflow-hidden rounded-2xl border transition ${
         highlighted
-          ? 'border-white/18 bg-[#151515]'
+          ? 'border-white bg-white/[0.09] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),0_10px_28px_rgba(255,255,255,0.04)]'
           : isWalletVariant
-            ? 'border-white/8 bg-white/[0.02] hover:border-white/14'
-            : 'border-white/8 bg-black/35 hover:border-white/14'
+            ? 'border-white/[0.08] bg-white/[0.015] hover:border-white/[0.14] hover:bg-white/[0.04]'
+            : 'border-white/[0.08] bg-white/[0.015] hover:border-white/[0.14] hover:bg-white/[0.04]'
       }`}
     >
       <div className={`${isWalletVariant ? 'p-4' : 'p-3'} flex items-center justify-between gap-3`}>

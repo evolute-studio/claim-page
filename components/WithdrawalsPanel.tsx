@@ -176,7 +176,7 @@ export function WithdrawalsPanel() {
             return (
               <div
                 key={item.id}
-                className="rounded-2xl border border-white/8 bg-black/35 p-3 transition hover:border-white/14"
+                className="rounded-2xl border border-white/[0.08] bg-white/[0.015] p-3 transition-[border-color,background-color] hover:border-white/[0.14] hover:bg-white/[0.04]"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">

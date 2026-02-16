@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { UserPill } from '@privy-io/react-auth/ui';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { Copy } from 'lucide-react';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { WalletPanel } from '@/components/WalletPanel';
 import { HistoryPanel } from '@/components/HistoryPanel';
@@ -25,29 +26,6 @@ function AccountIcon() {
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function CopyIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden="true">
-      <rect
-        x="9"
-        y="9"
-        width="11"
-        height="11"
-        rx="2"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path
-        d="M5 15V6a2 2 0 0 1 2-2h9"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
       />
     </svg>
   );
@@ -108,7 +86,7 @@ export default function AppPage() {
   const [focusToken, setFocusToken] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>('wallet');
   const [copied, setCopied] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [isMenuPressed, setIsMenuPressed] = useState(false);
   const queryFocusToken = searchParams.get('focusToken');
   const queryTab = searchParams.get('tab');
   const walletAddress = wallets[0]?.address ?? null;
@@ -144,7 +122,6 @@ export default function AppPage() {
 
   const handleTabChange = (tab: AppTab) => {
     setActiveTab(tab);
-    setMenuOpen(false);
     router.replace(`/app?tab=${tab}`);
   };
 
@@ -212,7 +189,7 @@ export default function AppPage() {
                   aria-label="Copy wallet address"
                   title={copied ? 'Copied' : 'Copy address'}
                 >
-                  <CopyIcon />
+                  <Copy size={16} strokeWidth={1.9} className="block" aria-hidden="true" />
                 </button>
               )}
               {copied && (
@@ -220,23 +197,48 @@ export default function AppPage() {
                   Copied
                 </div>
               )}
-              <button
-                type="button"
-                onClick={() => setMenuOpen((current) => !current)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-200 transition hover:bg-white/10"
-                aria-label="Open menu"
+              <div
+                className="group relative h-10 w-10"
+                onPointerDownCapture={() => setIsMenuPressed(true)}
+                onPointerUpCapture={() => setIsMenuPressed(false)}
+                onPointerCancelCapture={() => setIsMenuPressed(false)}
+                onPointerLeave={() => setIsMenuPressed(false)}
               >
-                <MenuIcon />
-              </button>
-            </div>
-          </div>
-          {menuOpen && (
-            <div className="absolute right-0 top-12 z-20 flex justify-end">
-              <div className="rounded-xl border border-white/10 bg-black/40 px-2 py-1.5">
-                <UserPill />
+                <span
+                  aria-hidden="true"
+                  className={`pointer-events-none inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-200 transition-[transform,background-color,border-color,color] duration-150 ease-out group-hover:border-white/25 group-hover:bg-white/10 group-hover:text-white ${
+                    isMenuPressed ? 'scale-95 border-white/30 bg-white/15 text-white' : ''
+                  }`}
+                >
+                  <MenuIcon />
+                </span>
+                <div className="absolute inset-0 [&>button]:!h-10 [&>button]:!w-10 [&>button]:!rounded-full [&>button]:opacity-0">
+                  <UserPill
+                    expanded={false}
+                    size={40}
+                    ui={{ background: 'secondary' }}
+                    label={
+                      <span
+                        style={{
+                          position: 'absolute',
+                          width: 1,
+                          height: 1,
+                          padding: 0,
+                          margin: -1,
+                          overflow: 'hidden',
+                          clip: 'rect(0, 0, 0, 0)',
+                          whiteSpace: 'nowrap',
+                          border: 0,
+                        }}
+                      >
+                        Open menu
+                      </span>
+                    }
+                  />
+                </div>
               </div>
             </div>
-          )}
+          </div>
         </header>
 
         <div className="min-h-0 flex-1 overflow-hidden pb-[calc(7rem+env(safe-area-inset-bottom))]">

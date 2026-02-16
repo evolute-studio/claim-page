@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getWithdrawalQuote } from '@/lib/api';
-import { isQuoteExpiredError, normalizeTimestamp, timeRemainingLabel, toNumberSafe } from '@/lib/withdraw';
+import { normalizeTimestamp, timeRemainingLabel, toNumberSafe } from '@/lib/withdraw';
 import type { DestinationChain, WithdrawalQuoteResponse } from '@/types/withdrawal';
 
 type DebugLogger = (stage: string, message: string, data?: Record<string, unknown>) => void;
@@ -17,6 +17,10 @@ type UseWithdrawalQuoteParams = {
   debugEnabled?: boolean;
   pushDebug?: DebugLogger;
 };
+
+const CACHED_QUOTE_REQUEST_DELAY_MS = 450;
+const NO_CACHE_QUOTE_RETRY_DELAY_MS = 300;
+const CACHED_QUOTE_RETRY_DELAY_MS = 1200;
 
 export function useWithdrawalQuote({
   destination,
@@ -107,32 +111,25 @@ export function useWithdrawalQuote({
     if (step !== 4) return;
     if (sending || isQuoteLocked || quoteLoading) return;
     if (quote) return;
+    if (!quoteError) return;
     if (!activeWalletAddress || !quoteRequestAmount || quoteRequestAmount <= 0n) return;
+    const retryDelay = feeEstimateMinor > 0n ? CACHED_QUOTE_RETRY_DELAY_MS : NO_CACHE_QUOTE_RETRY_DELAY_MS;
     const timerId = window.setTimeout(() => {
       setQuoteRefreshNonce((value) => value + 1);
-    }, 1200);
+    }, retryDelay);
     return () => window.clearTimeout(timerId);
   }, [
     activeWalletAddress,
     destination,
+    feeEstimateMinor,
     isQuoteLocked,
     quote,
+    quoteError,
     quoteLoading,
     quoteRequestAmount,
     sending,
     step,
   ]);
-
-  useEffect(() => {
-    if (destination === 'base') return;
-    if (step !== 4) return;
-    if (sending || isQuoteLocked || quoteLoading) return;
-    if (!quote || !quoteExpired) return;
-    const timerId = window.setTimeout(() => {
-      setQuoteRefreshNonce((value) => value + 1);
-    }, 900);
-    return () => window.clearTimeout(timerId);
-  }, [destination, isQuoteLocked, quote, quoteExpired, quoteLoading, sending, step]);
 
   useEffect(() => {
     if (destination === 'base') {
@@ -194,8 +191,12 @@ export function useWithdrawalQuote({
     setQuoteLoading(true);
     setQuoteError(null);
 
+    const hasFeeEstimateCache = feeEstimateMinor > 0n;
+    const requestDelay = hasFeeEstimateCache ? CACHED_QUOTE_REQUEST_DELAY_MS : 0;
+    let isCancelled = false;
+
     const requestId = ++quoteRequestId.current;
-    const handler = window.setTimeout(async () => {
+    const requestQuote = async () => {
       try {
         const token = await getAuthToken();
         if (debugEnabled && pushDebug) {
@@ -211,7 +212,7 @@ export function useWithdrawalQuote({
           dest_chain: destination,
           transfer_amount_usdc_minor: toNumberSafe(quoteRequestAmount),
         });
-        if (quoteRequestId.current !== requestId) return;
+        if (isCancelled || quoteRequestId.current !== requestId) return;
         setQuote(response);
         setFeeEstimateMinor(BigInt(response.max_fee_usdc_minor));
         setQuoteError(null);
@@ -225,26 +226,35 @@ export function useWithdrawalQuote({
           });
         }
       } catch (error) {
-        if (quoteRequestId.current !== requestId) return;
+        if (isCancelled || quoteRequestId.current !== requestId) return;
         const message = error instanceof Error ? error.message : 'Failed to fetch quote';
         setQuote(null);
         setQuoteError(message);
-        if (isQuoteExpiredError(message)) {
-          window.setTimeout(() => {
-            setQuoteRefreshNonce((value) => value + 1);
-          }, 900);
-        }
         if (debugEnabled && pushDebug) {
           pushDebug('quote:error', 'Quote request failed', { message });
         }
       } finally {
-        if (quoteRequestId.current === requestId) {
+        if (!isCancelled && quoteRequestId.current === requestId) {
           setQuoteLoading(false);
         }
       }
-    }, 450);
+    };
 
-    return () => window.clearTimeout(handler);
+    if (requestDelay === 0) {
+      void requestQuote();
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    const handler = window.setTimeout(() => {
+      void requestQuote();
+    }, requestDelay);
+
+    return () => {
+      isCancelled = true;
+      window.clearTimeout(handler);
+    };
   }, [
     activeWalletAddress,
     amountMode,

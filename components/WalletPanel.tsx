@@ -9,7 +9,7 @@ import {
   useWallets,
 } from '@privy-io/react-auth';
 import type { SendTransactionModalUIOptions } from '@privy-io/react-auth';
-import { ArrowLeft, Circle, X } from 'lucide-react';
+import { ArrowLeft, Circle, SendHorizontal, X } from 'lucide-react';
 import {
   createPublicClient,
   encodeFunctionData,
@@ -196,35 +196,6 @@ function BackspaceIcon({ size = 24 }: { size?: number }) {
   );
 }
 
-// Send icon shape from Lucide (ISC License), embedded as inline SVG.
-function SendIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-    >
-      <path
-        d="m3 3 3 9-3 9 19-9Z"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M6 12h16"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 const NETWORK_ICON_FILE_MAP: Partial<Record<DestinationChain, string>> = {
   base: '/icons/base.jpeg',
   ethereum: '/icons/ethereum.svg',
@@ -234,6 +205,11 @@ const NETWORK_ICON_FILE_MAP: Partial<Record<DestinationChain, string>> = {
   avalanche: '/icons/avalanche.jpeg',
   linea: '/icons/linea.svg',
 };
+const NETWORK_ICON_PRELOAD_URLS = Array.from(
+  new Set(
+    Object.values(NETWORK_ICON_FILE_MAP).filter((iconUrl): iconUrl is string => typeof iconUrl === 'string')
+  )
+);
 
 function NetworkIcon({
   chainKey,
@@ -291,7 +267,8 @@ function NetworkIcon({
           src={logoUrl}
           alt=""
           className={logoClass}
-          loading="lazy"
+          loading="eager"
+          decoding="async"
           onError={() => setLogoLoadFailed(true)}
         />
       ) : (
@@ -357,6 +334,7 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
   const [claimablePayoutsScrolling, setClaimablePayoutsScrolling] = useState(false);
   const claimableScrollTimeoutRef = useRef<number | null>(null);
   const claimableScrollArmedRef = useRef(false);
+  const networkIconsPreloadedRef = useRef(false);
 
   const pushDebug = useCallback(
     (stage: string, message: string, data?: Record<string, unknown>) => {
@@ -430,6 +408,7 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
   } = useNetworkFeeEstimates({
     withdrawOpen,
     step,
+    prefetchWhenClosed: isActive && !withdrawOpen && !!activeWalletAddress,
     destinationChains,
     getAuthToken,
     fetchFeeQuote: fetchNetworkFeeQuote,
@@ -469,6 +448,19 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
       token_messenger: config.tokenMessengerAddress,
     });
   }, [config, destinationChains, pushDebug, withdrawOpen]);
+
+  useEffect(() => {
+    if (!isActive || withdrawOpen || networkIconsPreloadedRef.current) return;
+    if (typeof window === 'undefined') return;
+
+    for (const iconUrl of NETWORK_ICON_PRELOAD_URLS) {
+      const icon = new window.Image();
+      icon.decoding = 'async';
+      icon.src = iconUrl;
+    }
+
+    networkIconsPreloadedRef.current = true;
+  }, [isActive, withdrawOpen]);
 
   useEffect(() => {
     if (!withdrawOpen || !WITHDRAW_DEBUG_ENABLED) return;
@@ -1482,7 +1474,7 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
             disabled={!activeWalletAddress || config.errors.length > 0}
             className="interactive-fx no-shimmer inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-3 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:bg-white/10 disabled:text-white/40"
           >
-            <SendIcon />
+            <SendHorizontal size={16} strokeWidth={1.9} className="block" aria-hidden="true" />
             <span className="font-num tracking-[0.04em]">Send</span>
           </button>
         </div>
@@ -1518,7 +1510,10 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
             {claimablePayoutsLoading ? (
               <div className="space-y-3 pb-2">
                 {Array.from({ length: 3 }).map((_, index) => (
-                  <div key={`claimable-skeleton-${index}`} className="overflow-hidden rounded-2xl border border-white/8 bg-white/[0.02] p-4">
+                  <div
+                    key={`claimable-skeleton-${index}`}
+                    className="overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.015] p-4"
+                  >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <span className="block h-8 w-40 animate-pulse rounded-lg bg-white/10" />

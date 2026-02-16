@@ -25,6 +25,10 @@ type HistorySelected =
   | { kind: 'income'; item: PayoutPreview }
   | { kind: 'outcome'; item: WithdrawalListItem };
 
+const VIEW_STAGGER_STEP_MS = 45;
+const VIEW_STAGGER_MAX_MS = 360;
+const VIEW_STAGGER_ROW_PX = 92;
+
 function formatUsdc(minor: number): string {
   return (minor / 1_000_000).toFixed(2);
 }
@@ -326,6 +330,16 @@ export function HistoryPanel({
     [markListScrolling]
   );
 
+  const getVisibleStaggerDelay = useCallback(
+    (index: number, kind: HistoryView) => {
+      const listEl = kind === 'incomes' ? incomesListRef.current : outcomesListRef.current;
+      const firstVisibleIndex = Math.max(0, Math.floor((listEl?.scrollTop ?? 0) / VIEW_STAGGER_ROW_PX));
+      const relativeIndex = Math.max(0, index - firstVisibleIndex);
+      return Math.min(relativeIndex * VIEW_STAGGER_STEP_MS, VIEW_STAGGER_MAX_MS);
+    },
+    []
+  );
+
   useEffect(() => {
     return () => {
       if (incomesScrollTimeoutRef.current) {
@@ -446,7 +460,7 @@ export function HistoryPanel({
             {Array.from({ length: 5 }).map((_, index) => (
               <div
                 key={`history-skeleton-${index}`}
-                className="rounded-2xl border border-white/8 bg-black/35 p-3"
+                className="rounded-2xl border border-white/[0.08] bg-white/[0.015] p-3"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
@@ -470,11 +484,11 @@ export function HistoryPanel({
           style={{ transitionDelay: '160ms' }}
         >
           <div
-            className={`flex h-full w-[200%] transition-transform duration-[600ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+            className={`flex h-full w-[200%] will-change-transform transition-transform duration-[600ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
               view === 'outcomes' ? '-translate-x-1/2' : 'translate-x-0'
             }`}
           >
-            <div className="min-h-0 h-full w-1/2">
+            <div className="min-h-0 h-full w-1/2 pr-1">
               {incomes.length === 0 ? (
                 <p className="text-sm text-gray-400">No incomes found.</p>
               ) : (
@@ -487,7 +501,7 @@ export function HistoryPanel({
                   onTouchStart={() => armListScroll('incomes')}
                   onTouchMove={() => armListScroll('incomes')}
                   onScroll={() => handleListScroll('incomes')}
-                  className={`min-h-0 h-full space-y-3 transient-scrollbar ${
+                  className={`min-h-0 h-full space-y-3 pr-1 transient-scrollbar ${
                     incomesScrolling && view === 'incomes' ? 'transient-scrollbar--visible' : ''
                   }`}
                 >
@@ -497,12 +511,12 @@ export function HistoryPanel({
                     return (
                       <div
                         key={itemId}
-                        className={`rounded-2xl border border-white/8 bg-black/35 p-3 transition-[transform,opacity,filter,border-color] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-white/14 ${
+                        className={`transform-gpu rounded-2xl border border-white/[0.08] bg-white/[0.015] p-3 transition-[transform,opacity,filter,border-color] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-white/[0.14] hover:bg-white/[0.04] ${
                           view === 'incomes'
                             ? 'translate-x-0 opacity-100 brightness-100'
                             : '-translate-x-8 opacity-35 brightness-50'
                         }`}
-                        style={{ transitionDelay: `${Math.min(index * 45, 360)}ms` }}
+                        style={{ transitionDelay: `${getVisibleStaggerDelay(index, 'incomes')}ms` }}
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0">
@@ -530,7 +544,7 @@ export function HistoryPanel({
               )}
             </div>
 
-            <div className="min-h-0 h-full w-1/2">
+            <div className="min-h-0 h-full w-1/2 pl-1">
               {outcomes.length === 0 ? (
                 <p className="text-sm text-gray-400">No outcomes found.</p>
               ) : (
@@ -543,7 +557,7 @@ export function HistoryPanel({
                   onTouchStart={() => armListScroll('outcomes')}
                   onTouchMove={() => armListScroll('outcomes')}
                   onScroll={() => handleListScroll('outcomes')}
-                  className={`min-h-0 h-full space-y-3 transient-scrollbar ${
+                  className={`min-h-0 h-full space-y-3 pr-1 transient-scrollbar ${
                     outcomesScrolling && view === 'outcomes' ? 'transient-scrollbar--visible' : ''
                   }`}
                 >
@@ -554,12 +568,12 @@ export function HistoryPanel({
                     return (
                       <div
                         key={item.id}
-                        className={`rounded-2xl border border-white/8 bg-black/35 p-3 transition-[transform,opacity,filter,border-color] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-white/14 ${
+                        className={`transform-gpu rounded-2xl border border-white/[0.08] bg-white/[0.015] p-3 transition-[transform,opacity,filter,border-color] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-white/[0.14] hover:bg-white/[0.04] ${
                           view === 'outcomes'
                             ? 'translate-x-0 opacity-100 brightness-100'
                             : 'translate-x-8 opacity-35 brightness-50'
                         }`}
-                        style={{ transitionDelay: `${Math.min(index * 45, 360)}ms` }}
+                        style={{ transitionDelay: `${getVisibleStaggerDelay(index, 'outcomes')}ms` }}
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0">
