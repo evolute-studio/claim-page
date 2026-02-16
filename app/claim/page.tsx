@@ -1,19 +1,20 @@
 'use client';
 
 import { useSearchParams, useRouter } from 'next/navigation';
-import {
-  getIdentityToken,
-  useIdentityToken,
-  usePrivy,
-  useWallets,
-} from '@privy-io/react-auth';
-import { UserPill } from '@privy-io/react-auth/ui';
-import { useState, useEffect, useRef, Suspense } from 'react';
+import { usePrivy } from '@privy-io/react-auth';
+import { useState, useEffect, useLayoutEffect, useRef, Suspense } from 'react';
 import type { FormEvent } from 'react';
-import { getClaimPreview, confirmClaim } from '@/lib/api';
-import { ClaimCard } from '@/components/ClaimCard';
+import { getClaimPreview } from '@/lib/api';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
-import { PayoutPreview } from '@/types/payout';
+import type { PayoutPreview } from '@/types/payout';
+
+function formatAmount(minor: number): string {
+  const amount = minor / 1_000_000;
+  return new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
 
 function ClaimContent() {
   const searchParams = useSearchParams();
@@ -21,19 +22,81 @@ function ClaimContent() {
   const token = searchParams.get('token');
 
   const { ready, authenticated, login } = usePrivy();
-  const { identityToken } = useIdentityToken();
-  const { wallets } = useWallets();
 
   const [preview, setPreview] = useState<PayoutPreview | null>(null);
   const [loading, setLoading] = useState(true);
-  const [claiming, setClaiming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const previewRequestIdRef = useRef(0);
   const [manualToken, setManualToken] = useState('');
+  const [amountFontSizePx, setAmountFontSizePx] = useState(56);
+  const amountContainerRef = useRef<HTMLDivElement | null>(null);
+  const amountMeasureRef = useRef<HTMLSpanElement | null>(null);
+  const amountLabel = preview ? `${formatAmount(preview.amount_minor_units)} ${preview.asset}` : '';
 
-  const walletAddress = wallets[0]?.address;
+  useLayoutEffect(() => {
+    if (!amountLabel) return;
 
-  // Load preview on mount
+    const container = amountContainerRef.current;
+    const measure = amountMeasureRef.current;
+    if (!container || !measure) return;
+
+    const MIN_FONT_PX = 30;
+    const MAX_FONT_PX = 72;
+    let frameId = 0;
+
+    const fitAmount = () => {
+      const availableWidth = container.clientWidth;
+      if (!availableWidth) return;
+
+      let low = MIN_FONT_PX;
+      let high = MAX_FONT_PX;
+      let best = MIN_FONT_PX;
+
+      for (let i = 0; i < 20; i += 1) {
+        const mid = (low + high) / 2;
+        measure.style.fontSize = `${mid}px`;
+        const textWidth = measure.scrollWidth;
+
+        if (textWidth <= availableWidth) {
+          best = mid;
+          low = mid;
+        } else {
+          high = mid;
+        }
+      }
+
+      setAmountFontSizePx(Math.round(best * 10) / 10);
+    };
+
+    const scheduleFit = () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(fitAmount);
+    };
+
+    scheduleFit();
+
+    const resizeObserver = new ResizeObserver(() => {
+      scheduleFit();
+    });
+    resizeObserver.observe(container);
+
+    if (document.fonts) {
+      document.fonts.ready.then(() => {
+        scheduleFit();
+      });
+    }
+
+    return () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      resizeObserver.disconnect();
+    };
+  }, [amountLabel]);
+
+  useEffect(() => {
+    if (!ready || !authenticated) return;
+    router.replace('/app');
+  }, [authenticated, ready, router]);
+
   useEffect(() => {
     const requestId = ++previewRequestIdRef.current;
     const controller = new AbortController();
@@ -77,105 +140,106 @@ function ClaimContent() {
     router.push(`/claim?token=${encodeURIComponent(trimmed)}`);
   };
 
-  // Handle connect
-  const handleConnect = () => {
+  const handleLogin = () => {
     login();
   };
 
-  // Handle claim
-  const handleClaim = async () => {
-    if (!token || !walletAddress) return;
-
-    setClaiming(true);
-    setError(null);
-
-    try {
-      let freshToken: string | null = null;
-      try {
-        freshToken = await getIdentityToken();
-      } catch {
-        freshToken = null;
-      }
-      const privyIdentityToken = freshToken ?? identityToken;
-      if (!privyIdentityToken) {
-        throw new Error('Missing identity token. Please re-login.');
-      }
-
-      await confirmClaim(token, walletAddress, privyIdentityToken);
-      router.replace(`/app?focusToken=${encodeURIComponent(token)}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Claim failed');
-    } finally {
-      setClaiming(false);
-    }
-  };
-
-  // Parse amount for display
-  const formatAmount = (preview: PayoutPreview): string => {
-    const amount = preview.amount_minor_units / 1_000_000;
-    return `${amount.toFixed(2)} ${preview.asset}`;
-  };
-
-  // Loading state
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center space-y-4">
-          <LoadingSpinner size="lg" />
-          <p className="text-gray-400">Loading claim...</p>
+      <div className="relative min-h-screen overflow-hidden bg-[#0a0a0a] text-white">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -left-24 top-16 h-64 w-64 rounded-full bg-white/[0.04] blur-3xl" />
+          <div className="absolute -right-20 bottom-24 h-72 w-72 rounded-full bg-white/[0.03] blur-3xl" />
         </div>
-      </div>
-    );
-  }
-
-  // No token provided: show input
-  if (!token) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
-        <div className="w-full max-w-md mx-auto space-y-4">
-          <h1 className="text-2xl font-bold text-white text-center">Enter claim token</h1>
-          <form onSubmit={handleTokenSubmit} className="space-y-3">
-            <input
-              type="text"
-              value={manualToken}
-              onChange={(event) => setManualToken(event.target.value)}
-              placeholder="Paste token here"
-              className="w-full rounded-md bg-black/40 border border-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-            />
-            <button
-              type="submit"
-              className="w-full rounded-md bg-purple-600 px-3 py-2 text-sm font-semibold text-white transition"
-            >
-              Continue
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-  // Error state (API error)
-  if (error && !preview) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
-        <div className="w-full max-w-md mx-auto text-center space-y-4">
-          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-6">
-            <h1 className="text-xl font-bold text-red-400 mb-2">Unable to load claim</h1>
-            <p className="text-gray-400">{error}</p>
+        <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-8">
+          <div className="animate-fade-in-up rounded-3xl border border-white/10 bg-[#111111]/95 p-6 text-center shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
+            <p className="text-xs font-medium tracking-[0.14em] text-gray-400">EVOLUTE WALLET</p>
+            <p className="mt-3 text-sm text-gray-400">Loading claim...</p>
+            <div className="mt-4 inline-flex items-center justify-center">
+              <LoadingSpinner size="lg" />
+            </div>
           </div>
         </div>
       </div>
     );
   }
 
-  // No preview data
+  if (!token) {
+    return (
+      <div className="relative min-h-screen overflow-hidden bg-[#0a0a0a] text-white">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -left-24 top-16 h-64 w-64 rounded-full bg-white/[0.04] blur-3xl" />
+          <div className="absolute -right-20 bottom-24 h-72 w-72 rounded-full bg-white/[0.03] blur-3xl" />
+        </div>
+
+        <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-8">
+          <div className="animate-fade-in-up rounded-3xl border border-white/10 bg-[#111111]/95 p-6 text-center shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
+            <p className="text-xs font-medium tracking-[0.14em] text-gray-400">EVOLUTE WALLET</p>
+            <h1 className="mt-3 text-3xl font-semibold leading-tight text-white">Open claim link</h1>
+            <p className="mt-2 text-sm text-gray-400">Paste your claim token to continue.</p>
+
+            <form onSubmit={handleTokenSubmit} className="mt-5 space-y-3 text-left">
+              <input
+                type="text"
+                value={manualToken}
+                onChange={(event) => setManualToken(event.target.value)}
+                placeholder="Paste token here"
+                className="w-full rounded-2xl border border-white/12 bg-white/[0.02] px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/25 focus:bg-white/[0.05]"
+              />
+              <button
+                type="submit"
+                disabled={!manualToken.trim()}
+                className="interactive-fx no-shimmer inline-flex w-full items-center justify-center rounded-2xl border border-transparent bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:border-white/12 disabled:bg-white/10 disabled:text-white/40"
+              >
+                Continue
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !preview) {
+    return (
+      <div className="relative min-h-screen overflow-hidden bg-[#0a0a0a] text-white">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -left-24 top-16 h-64 w-64 rounded-full bg-white/[0.04] blur-3xl" />
+          <div className="absolute -right-20 bottom-24 h-72 w-72 rounded-full bg-white/[0.03] blur-3xl" />
+        </div>
+
+        <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-8">
+          <div className="animate-fade-in-up rounded-3xl border border-white/10 bg-[#111111]/95 p-6 text-center shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
+            <p className="text-xs font-medium tracking-[0.14em] text-gray-400">EVOLUTE WALLET</p>
+            <h1 className="mt-3 text-3xl font-semibold leading-tight text-white">Claim not found</h1>
+            <p className="mt-2 text-sm text-gray-400">{error}</p>
+
+            <button
+              type="button"
+              onClick={() => router.push('/claim')}
+              className="interactive-fx no-shimmer mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-transparent bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-white/90"
+            >
+              Try another token
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!preview) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
-        <div className="w-full max-w-md mx-auto text-center space-y-4">
-          <div className="bg-gray-500/10 border border-gray-500/20 rounded-lg p-6">
-            <h1 className="text-xl font-bold text-gray-400 mb-2">Claim not found</h1>
-            <p className="text-gray-400">This claim link is invalid or has expired.</p>
+      <div className="relative min-h-screen overflow-hidden bg-[#0a0a0a] text-white">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -left-24 top-16 h-64 w-64 rounded-full bg-white/[0.04] blur-3xl" />
+          <div className="absolute -right-20 bottom-24 h-72 w-72 rounded-full bg-white/[0.03] blur-3xl" />
+        </div>
+
+        <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-8">
+          <div className="animate-fade-in-up rounded-3xl border border-white/10 bg-[#111111]/95 p-6 text-center shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
+            <p className="text-xs font-medium tracking-[0.14em] text-gray-400">EVOLUTE WALLET</p>
+            <h1 className="mt-3 text-3xl font-semibold leading-tight text-white">Claim not found</h1>
+            <p className="mt-2 text-sm text-gray-400">This claim link is invalid or expired.</p>
           </div>
         </div>
       </div>
@@ -183,43 +247,65 @@ function ClaimContent() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4">
-      {/* Logo + Privy wallet UI */}
-      <div className="mb-8 w-full max-w-md mx-auto flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">Evolute</h1>
-        <UserPill />
+    <div className="relative min-h-screen overflow-hidden bg-[#0a0a0a] text-white">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -left-24 top-16 h-64 w-64 rounded-full bg-white/[0.04] blur-3xl" />
+        <div className="absolute -right-20 bottom-24 h-72 w-72 rounded-full bg-white/[0.03] blur-3xl" />
       </div>
 
-      {/* Error message (for claim errors) */}
-      {error && (
-        <div className="w-full max-w-md mx-auto mb-4">
-          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
-            <p className="text-sm text-red-400">{error}</p>
+      <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-8">
+        <section className="relative animate-fade-in-up overflow-hidden rounded-3xl border border-white/10 bg-[#111111]/95 p-6 text-center shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute left-4 top-4 h-4 w-4 rounded-tl-md border-l border-t border-white/25"
+          />
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute right-4 top-4 h-4 w-4 rounded-tr-md border-r border-t border-white/25"
+          />
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute left-8 top-8 h-1.5 w-1.5 rounded-full bg-white/25"
+          />
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute right-8 top-8 h-1.5 w-1.5 rounded-full bg-white/25"
+          />
+
+          <p className="text-xs font-medium tracking-[0.14em] text-gray-400">EVOLUTE WALLET</p>
+          <h1 className="mt-3 text-xl font-semibold leading-tight text-white">You earned</h1>
+          <div
+            ref={amountContainerRef}
+            className="mx-auto mt-3 overflow-hidden"
+            style={{ width: 'calc(100% - 4rem)' }}
+          >
+            <p
+              className="font-num mx-auto w-fit max-w-full whitespace-nowrap font-semibold leading-none tracking-[0.02em] text-white"
+              style={{ fontSize: `${amountFontSizePx}px` }}
+            >
+              {formatAmount(preview.amount_minor_units)} <span className="text-gray-400">{preview.asset}</span>
+            </p>
+            <span
+              ref={amountMeasureRef}
+              aria-hidden="true"
+              className="font-num pointer-events-none absolute -left-[9999px] top-0 whitespace-nowrap font-semibold leading-none tracking-[0.02em] opacity-0"
+            >
+              {amountLabel}
+            </span>
           </div>
-        </div>
-      )}
+          <p className="mt-4 text-sm text-gray-400">Sign in to claim your payout.</p>
 
-      {/* Claim card */}
-      <ClaimCard
-        amount={formatAmount(preview)}
-        chain={preview.chain}
-        rank={preview.rank}
-        status={preview.status}
-        expiresAt={preview.expires_at}
-        maskedEmail={preview.recipient_email}
-        onConnect={handleConnect}
-        onClaim={handleClaim}
-        isLoading={claiming}
-        walletAddress={walletAddress}
-        isAuthenticated={authenticated}
-        isPrivyReady={ready}
-      />
+          <button
+            type="button"
+            onClick={handleLogin}
+            disabled={!ready}
+            className="interactive-fx no-shimmer mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-transparent bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:border-white/12 disabled:bg-white/10 disabled:text-white/40"
+          >
+            {ready ? 'Continue with Privy' : 'Loading...'}
+          </button>
 
-      {/* Footer */}
-      <div className="mt-8 text-center">
-        <p className="text-xs text-gray-500">
-          Prize will be sent to your wallet on Base network
-        </p>
+          <p className="mt-3 text-xs text-gray-500">You will be redirected to your wallet.</p>
+        </section>
       </div>
     </div>
   );
@@ -229,8 +315,20 @@ export default function ClaimPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen flex items-center justify-center bg-background">
-          <LoadingSpinner size="lg" />
+        <div className="relative min-h-screen overflow-hidden bg-[#0a0a0a] text-white">
+          <div className="pointer-events-none absolute inset-0">
+            <div className="absolute -left-24 top-16 h-64 w-64 rounded-full bg-white/[0.04] blur-3xl" />
+            <div className="absolute -right-20 bottom-24 h-72 w-72 rounded-full bg-white/[0.03] blur-3xl" />
+          </div>
+          <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-8">
+            <div className="animate-fade-in-up rounded-3xl border border-white/10 bg-[#111111]/95 p-6 text-center shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
+              <p className="text-xs font-medium tracking-[0.14em] text-gray-400">EVOLUTE WALLET</p>
+              <p className="mt-3 text-sm text-gray-400">Loading claim...</p>
+              <div className="mt-4 inline-flex items-center justify-center">
+                <LoadingSpinner size="lg" />
+              </div>
+            </div>
+          </div>
         </div>
       }
     >
