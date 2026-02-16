@@ -85,6 +85,7 @@ export default function AppPage() {
   const { ready, authenticated } = usePrivy();
   const [focusToken, setFocusToken] = useState<string | null>(null);
   const [focusPayoutRef, setFocusPayoutRef] = useState<string | null>(null);
+  const [focusTargetTab, setFocusTargetTab] = useState<AppTab | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>('wallet');
   const [copied, setCopied] = useState(false);
   const [isMenuPressed, setIsMenuPressed] = useState(false);
@@ -108,9 +109,8 @@ export default function AppPage() {
     if (!queryFocusToken && !queryFocusPayout) return;
     setFocusToken(queryFocusToken);
     setFocusPayoutRef(queryFocusPayout);
-    setActiveTab('history');
-    routerRef.current.replace('/app?tab=history');
-  }, [queryFocusPayout, queryFocusToken]);
+    setFocusTargetTab(queryTab === 'history' ? 'history' : 'wallet');
+  }, [queryFocusPayout, queryFocusToken, queryTab]);
 
   useEffect(() => {
     if (queryTab === 'wallet' || queryTab === 'history') {
@@ -132,6 +132,7 @@ export default function AppPage() {
     (next: { focusToken?: string | null; focusPayoutRef?: string | null }) => {
       setFocusToken(next.focusToken ?? null);
       setFocusPayoutRef(next.focusPayoutRef ?? null);
+      setFocusTargetTab('history');
       setActiveTab('history');
       router.replace('/app?tab=history');
     },
@@ -266,6 +267,8 @@ export default function AppPage() {
             >
               <WalletPanel
                 isActive={activeTab === 'wallet'}
+                focusToken={focusTargetTab === 'wallet' ? focusToken : null}
+                focusPayoutRef={focusTargetTab === 'wallet' ? focusPayoutRef : null}
                 onClaimedPayoutFocus={handleClaimedPayoutFocus}
               />
             </div>
@@ -275,8 +278,8 @@ export default function AppPage() {
               }`}
             >
               <HistoryPanel
-                focusToken={focusToken ?? queryFocusToken}
-                focusPayoutRef={focusPayoutRef ?? queryFocusPayout}
+                focusToken={focusTargetTab === 'history' ? focusToken : null}
+                focusPayoutRef={focusTargetTab === 'history' ? focusPayoutRef : null}
                 isActive={activeTab === 'history'}
               />
             </div>

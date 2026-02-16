@@ -28,6 +28,7 @@ interface PayoutListCardProps {
   amountLabel: string;
   sourceLabel?: string;
   highlighted?: boolean;
+  className?: string;
   onDetails?: () => void;
   showStatus?: boolean;
   variant?: 'default' | 'wallet';
@@ -41,6 +42,7 @@ export function PayoutListCard({
   amountLabel,
   sourceLabel,
   highlighted = false,
+  className,
   onDetails,
   showStatus = true,
   variant = 'default',
@@ -64,7 +66,7 @@ export function PayoutListCard({
           : isWalletVariant
             ? 'border-white/[0.08] bg-white/[0.015] hover:border-white/[0.14] hover:bg-white/[0.04]'
             : 'border-white/[0.08] bg-white/[0.015] hover:border-white/[0.14] hover:bg-white/[0.04]'
-      }`}
+      } ${className ?? ''}`}
     >
       <div className={`${isWalletVariant ? 'p-4' : 'p-3'} flex items-center justify-between gap-3`}>
         <div className="min-w-0">

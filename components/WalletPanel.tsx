@@ -210,6 +210,8 @@ const NETWORK_ICON_PRELOAD_URLS = Array.from(
     Object.values(NETWORK_ICON_FILE_MAP).filter((iconUrl): iconUrl is string => typeof iconUrl === 'string')
   )
 );
+const CLAIMABLE_HIGHLIGHT_DURATION_MS = 2800;
+const CLAIMABLE_HIGHLIGHT_SCROLL_DELAY_MS = 90;
 
 function NetworkIcon({
   chainKey,
@@ -283,9 +285,13 @@ type WithdrawStep = 1 | 2 | 4;
 
 export function WalletPanel({
   isActive = true,
+  focusToken = null,
+  focusPayoutRef = null,
   onClaimedPayoutFocus,
 }: {
   isActive?: boolean;
+  focusToken?: string | null;
+  focusPayoutRef?: string | null;
   onClaimedPayoutFocus?: (next: { focusToken?: string | null; focusPayoutRef?: string | null }) => void;
 }) {
   const { wallets } = useWallets();
@@ -336,10 +342,14 @@ export function WalletPanel({
   const [claimablePayoutsLoading, setClaimablePayoutsLoading] = useState(false);
   const [claimablePayoutsError, setClaimablePayoutsError] = useState<string | null>(null);
   const [claimingPayoutId, setClaimingPayoutId] = useState<string | null>(null);
+  const [highlightedClaimableId, setHighlightedClaimableId] = useState<string | null>(null);
   const [selectedPayout, setSelectedPayout] = useState<PayoutPreview | null>(null);
   const [claimablePayoutsScrolling, setClaimablePayoutsScrolling] = useState(false);
   const claimableScrollTimeoutRef = useRef<number | null>(null);
   const claimableScrollArmedRef = useRef(false);
+  const claimableHighlightTimeoutRef = useRef<number | null>(null);
+  const claimableRowRefsRef = useRef<Record<string, HTMLDivElement | null>>({});
+  const lastHandledClaimableFocusSignatureRef = useRef<string | null>(null);
   const networkIconsPreloadedRef = useRef(false);
 
   const pushDebug = useCallback(
@@ -1226,6 +1236,9 @@ export function WalletPanel({
       if (claimableScrollTimeoutRef.current) {
         window.clearTimeout(claimableScrollTimeoutRef.current);
       }
+      if (claimableHighlightTimeoutRef.current) {
+        window.clearTimeout(claimableHighlightTimeoutRef.current);
+      }
       claimableScrollArmedRef.current = false;
     };
   }, []);
@@ -1249,6 +1262,45 @@ export function WalletPanel({
     if (!claimableScrollArmedRef.current) return;
     markClaimablePayoutsScrolling();
   }, [markClaimablePayoutsScrolling]);
+
+  const focusedClaimableId = useMemo(() => {
+    const focused = claimablePayouts.find((item) => {
+      if (focusPayoutRef) {
+        if (item.id === focusPayoutRef) return true;
+        if (item.payout_id === focusPayoutRef) return true;
+        if (item.claim_token === focusPayoutRef) return true;
+      }
+      if (focusToken && item.claim_token === focusToken) return true;
+      return false;
+    });
+    if (!focused) return null;
+    return focused.id ?? focused.payout_id ?? focused.claim_token ?? `${focused.status}-${focused.expires_at}`;
+  }, [claimablePayouts, focusPayoutRef, focusToken]);
+
+  useEffect(() => {
+    if (!focusedClaimableId || withdrawOpen) return;
+    const focusSignature = `${focusToken ?? ''}|${focusPayoutRef ?? ''}|${focusedClaimableId}`;
+    if (lastHandledClaimableFocusSignatureRef.current === focusSignature) return;
+    lastHandledClaimableFocusSignatureRef.current = focusSignature;
+
+    const timerId = window.setTimeout(() => {
+      const row = claimableRowRefsRef.current[focusedClaimableId];
+      if (row) {
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+      setHighlightedClaimableId(focusedClaimableId);
+      if (claimableHighlightTimeoutRef.current) {
+        window.clearTimeout(claimableHighlightTimeoutRef.current);
+      }
+      claimableHighlightTimeoutRef.current = window.setTimeout(() => {
+        setHighlightedClaimableId((current) => (current === focusedClaimableId ? null : current));
+      }, CLAIMABLE_HIGHLIGHT_DURATION_MS);
+    }, CLAIMABLE_HIGHLIGHT_SCROLL_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [focusPayoutRef, focusToken, focusedClaimableId, withdrawOpen]);
 
   if (withdrawOpen) {
     const headerTitle = 'Send';
@@ -1550,9 +1602,13 @@ export function WalletPanel({
                   const hasClaimRef = !!item.claim_token || !!item.payout_id || !!item.id;
                   const canClaim = item.status === 'CREATED' && hasClaimRef && !!activeWalletAddress;
                   const isClaiming = claimingPayoutId === key;
+                  const isHighlighted = highlightedClaimableId === key;
                   return (
                     <div
                       key={key}
+                      ref={(node) => {
+                        claimableRowRefsRef.current[key] = node;
+                      }}
                       className={`transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
                         isActive ? 'translate-x-0 opacity-100 brightness-100' : '-translate-x-8 opacity-35 brightness-50'
                       }`}
@@ -1564,6 +1620,7 @@ export function WalletPanel({
                         sourceLabel="Tournament reward"
                         showStatus={false}
                         variant="wallet"
+                        className={isHighlighted ? 'history-payout-focus-flash' : undefined}
                         onDetails={() => setSelectedPayout(item)}
                         canClaim={canClaim}
                         isClaiming={isClaiming}

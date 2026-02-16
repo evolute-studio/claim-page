@@ -32,6 +32,10 @@ function ClaimContent() {
   const amountContainerRef = useRef<HTMLDivElement | null>(null);
   const amountMeasureRef = useRef<HTMLSpanElement | null>(null);
   const amountLabel = preview ? `${formatAmount(preview.amount_minor_units)} ${preview.asset}` : '';
+  const previewFocusPayoutRef =
+    preview?.payout_id ??
+    preview?.id ??
+    ((preview as unknown as { payoutId?: string } | null)?.payoutId ?? null);
 
   useLayoutEffect(() => {
     if (!amountLabel) return;
@@ -94,12 +98,18 @@ function ClaimContent() {
 
   useEffect(() => {
     if (!ready || !authenticated) return;
+    if (token && loading) return;
+
+    const params = new URLSearchParams();
+    params.set('tab', 'wallet');
     if (token) {
-      router.replace(`/app?tab=history&focusToken=${encodeURIComponent(token)}`);
-      return;
+      params.set('focusToken', token);
     }
-    router.replace('/app?tab=history');
-  }, [authenticated, ready, router, token]);
+    if (previewFocusPayoutRef) {
+      params.set('focusPayout', previewFocusPayoutRef);
+    }
+    router.replace(`/app?${params.toString()}`);
+  }, [authenticated, loading, previewFocusPayoutRef, ready, router, token]);
 
   useEffect(() => {
     const requestId = ++previewRequestIdRef.current;
@@ -308,7 +318,7 @@ function ClaimContent() {
             {ready ? 'Continue with Privy' : 'Loading...'}
           </button>
 
-          <p className="mt-3 text-xs text-gray-500">You will be redirected to your history.</p>
+          <p className="mt-3 text-xs text-gray-500">You will be redirected to your wallet.</p>
         </section>
       </div>
     </div>
