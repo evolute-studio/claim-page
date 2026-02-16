@@ -1,16 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { getIdentityToken, useIdentityToken, useWallets } from '@privy-io/react-auth';
+import { getIdentityToken, useIdentityToken } from '@privy-io/react-auth';
 import { RotateCw } from 'lucide-react';
-import {
-  confirmClaim,
-  confirmClaimByPayoutId,
-  getMyPayouts,
-  getMyWithdrawals,
-} from '@/lib/api';
+import { getMyPayouts, getMyWithdrawals } from '@/lib/api';
 import { getCctpConfig, getDestinationChains } from '@/lib/cctp';
-import { CoinIcon } from '@/components/CoinIcon';
 import { StatusBadge } from '@/components/StatusBadge';
 import { WithdrawalStatusBadge } from '@/components/WithdrawalStatusBadge';
 import { truncateAddress } from '@/lib/format';
@@ -21,9 +15,6 @@ type HistoryView = 'incomes' | 'outcomes';
 type LoadHistoryOptions = {
   showRefreshIndicator?: boolean;
 };
-type HistorySelected =
-  | { kind: 'income'; item: PayoutPreview }
-  | { kind: 'outcome'; item: WithdrawalListItem };
 
 const VIEW_STAGGER_STEP_MS = 45;
 const VIEW_STAGGER_MAX_MS = 360;
@@ -114,8 +105,6 @@ export function HistoryPanel({
   isActive?: boolean;
 }) {
   const { identityToken } = useIdentityToken();
-  const { wallets } = useWallets();
-  const walletAddress = wallets[0]?.address;
   const config = useMemo(() => getCctpConfig(), []);
   const destinations = useMemo(() => getDestinationChains(config.sourceChain), [config.sourceChain]);
   const [view, setView] = useState<HistoryView>('incomes');
@@ -125,8 +114,8 @@ export function HistoryPanel({
   const [error, setError] = useState<string | null>(null);
   const [payouts, setPayouts] = useState<PayoutPreview[]>([]);
   const [withdrawals, setWithdrawals] = useState<WithdrawalListItem[]>([]);
-  const [selected, setSelected] = useState<HistorySelected | null>(null);
-  const [claimingId, setClaimingId] = useState<string | null>(null);
+  const [flippedIncomeId, setFlippedIncomeId] = useState<string | null>(null);
+  const [flippedOutcomeId, setFlippedOutcomeId] = useState<string | null>(null);
   const [highlightedIncomeId, setHighlightedIncomeId] = useState<string | null>(null);
   const [incomesScrolling, setIncomesScrolling] = useState(false);
   const [outcomesScrolling, setOutcomesScrolling] = useState(false);
@@ -268,7 +257,8 @@ export function HistoryPanel({
     lastHandledFocusSignatureRef.current = focusSignature;
 
     setView('incomes');
-    setSelected(null);
+    setFlippedIncomeId(null);
+    setFlippedOutcomeId(null);
 
     const timerId = window.setTimeout(() => {
       const row = incomeRowRefsRef.current[focusedIncomeId];
@@ -289,45 +279,6 @@ export function HistoryPanel({
     };
   }, [focusPayoutRef, focusToken, focusedIncomeId]);
 
-  const handleClaim = useCallback(
-    async (item: PayoutPreview) => {
-      if (!walletAddress) return;
-      const payoutId = item.payout_id ?? item.id;
-      if (!item.claim_token && !payoutId) return;
-
-      const itemId = item.id ?? item.payout_id ?? item.claim_token ?? null;
-      setClaimingId(itemId);
-      setError(null);
-      try {
-        const token = await getAuthToken();
-        if (item.claim_token) {
-          try {
-            await confirmClaim(item.claim_token, walletAddress, token);
-          } catch (claimByTokenError) {
-            const message =
-              claimByTokenError instanceof Error ? claimByTokenError.message : 'Claim failed';
-            const canRetryById = !!payoutId && message.toLowerCase().includes('missing claim_token');
-            if (!canRetryById) throw claimByTokenError;
-            await confirmClaimByPayoutId(payoutId, walletAddress, token);
-          }
-        } else if (payoutId) {
-          await confirmClaimByPayoutId(payoutId, walletAddress, token);
-        }
-        await loadHistory('background');
-      } catch (claimError) {
-        const message = claimError instanceof Error ? claimError.message : 'Claim failed';
-        setError(
-          message === 'Missing claim token'
-            ? 'Server expects claim token for this payout. Check `/payouts/me` response fields.'
-            : message
-        );
-      } finally {
-        setClaimingId(null);
-      }
-    },
-    [getAuthToken, loadHistory, walletAddress]
-  );
-
   const baseExplorer =
     config.sourceChain.id === 84532 ? 'https://sepolia.basescan.org/tx/' : 'https://basescan.org/tx/';
   const getDestinationExplorer = (chain: DestinationChain): string | null => {
@@ -337,6 +288,8 @@ export function HistoryPanel({
   const handleViewChange = useCallback(
     (nextView: HistoryView) => {
       if (nextView === view) return;
+      setFlippedIncomeId(null);
+      setFlippedOutcomeId(null);
       setView(nextView);
     },
     [view]
@@ -563,36 +516,116 @@ export function HistoryPanel({
                     const itemId =
                       item.id ?? item.payout_id ?? item.claim_token ?? `${item.status}-${item.expires_at}`;
                     const isHighlighted = highlightedIncomeId === itemId;
+                    const isFlipped = flippedIncomeId === itemId;
+                    const incomeExplorerUrl = item.tx_hash ? openExplorerUrl(item.chain, item.tx_hash) : '';
+                    const incomeFailureLines = Math.max(
+                      1,
+                      Math.ceil((item.failure_reason?.length ?? 0) / 42)
+                    );
+                    const incomeFailureHeight = item.failure_reason
+                      ? 34 + Math.max(0, incomeFailureLines - 1) * 16
+                      : 0;
+                    const incomeTxHeight = item.tx_hash ? 74 : 0;
+                    const incomeRowHeight = isFlipped ? 176 + incomeTxHeight + incomeFailureHeight : 68;
+
                     return (
                       <div
                         key={itemId}
                         ref={(node) => {
                           incomeRowRefsRef.current[itemId] = node;
                         }}
-                        className={`transform-gpu rounded-2xl border border-white/[0.08] bg-white/[0.015] p-3 transition-[transform,opacity,filter,border-color] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-white/[0.14] hover:bg-white/[0.04] ${
+                        className={`transform-gpu overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.015] transition-[transform,opacity,filter,border-color,height] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-white/[0.14] hover:bg-white/[0.04] ${
                           view === 'incomes'
                             ? 'translate-x-0 opacity-100 brightness-100'
                             : '-translate-x-8 opacity-35 brightness-50'
                         } ${isHighlighted ? 'history-payout-focus-flash' : ''}`}
-                        style={{ transitionDelay: `${getVisibleStaggerDelay(index, 'incomes')}ms` }}
+                        style={{
+                          transitionDelay: `${getVisibleStaggerDelay(index, 'incomes')}ms`,
+                          height: `${incomeRowHeight}px`,
+                        }}
                       >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="font-num truncate text-base font-semibold leading-5 text-white">
-                              {formatUsdc(item.amount_minor_units)} <span className="text-gray-400">USDC</span>
-                            </p>
-                            <p className="truncate text-xs leading-4 text-gray-500">Tournament reward</p>
-                          </div>
-                          <div className="flex shrink-0 items-center gap-2">
-                            <StatusBadge status={item.status} />
-                            <button
-                              type="button"
-                              onClick={() => setSelected({ kind: 'income', item })}
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-100 transition hover:bg-white/10"
-                              aria-label="Open details"
-                            >
-                              <VerticalDotsIcon />
-                            </button>
+                        <div className="history-flip-scene h-full">
+                          <div className={`history-flip-card h-full ${isFlipped ? 'is-flipped' : ''}`}>
+                            <div className="history-flip-face history-flip-face--front p-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="font-num truncate text-base font-semibold leading-5 text-white">
+                                    {formatUsdc(item.amount_minor_units)}{' '}
+                                    <span className="text-gray-400">USDC</span>
+                                  </p>
+                                  <p className="truncate text-xs leading-4 text-gray-500">Tournament reward</p>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-2">
+                                  <StatusBadge status={item.status} />
+                                  <button
+                                    type="button"
+                                    onClick={() => setFlippedIncomeId(itemId)}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-100 transition hover:bg-white/10"
+                                    aria-label="Show payout details"
+                                  >
+                                    <VerticalDotsIcon />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="history-flip-face history-flip-face--back space-y-3 p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="font-num truncate text-sm font-semibold leading-5 text-white">
+                                    {formatUsdc(item.amount_minor_units)}{' '}
+                                    <span className="text-gray-400">USDC</span>
+                                  </p>
+                                  <p className="truncate text-xs leading-4 text-gray-500">Income details</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setFlippedIncomeId(null)}
+                                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-100 transition hover:bg-white/10"
+                                  aria-label="Hide payout details"
+                                >
+                                  <CloseIcon size={16} />
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div>
+                                  <p className="text-gray-500">Chain</p>
+                                  <p className="truncate text-gray-200">{item.chain || '—'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-gray-500">Recipient</p>
+                                  <p className="truncate text-gray-200">{item.recipient_email || '—'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-gray-500">Created</p>
+                                  <p className="text-gray-200">{formatDate(item.created_at)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-gray-500">Paid</p>
+                                  <p className="text-gray-200">{formatDate(item.paid_at)}</p>
+                                </div>
+                              </div>
+                              {item.tx_hash ? (
+                                <div className="space-y-1 text-xs">
+                                  <p className="text-gray-500">Transaction</p>
+                                  <p className="break-all text-gray-300">{truncateHash(item.tx_hash)}</p>
+                                  {incomeExplorerUrl ? (
+                                    <a
+                                      href={incomeExplorerUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-block text-gray-200 hover:underline"
+                                    >
+                                      View in explorer
+                                    </a>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                              {item.failure_reason ? (
+                                <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2">
+                                  <p className="text-xs text-red-300">{item.failure_reason}</p>
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -622,35 +655,132 @@ export function HistoryPanel({
                   {outcomes.map((item, index) => {
                     const destinationLabel =
                       destinations.find((dest) => dest.key === item.dest_chain)?.label ?? item.dest_chain;
+                    const isFlipped = flippedOutcomeId === item.id;
+                    const destinationExplorerBase = getDestinationExplorer(item.dest_chain);
+                    const outcomeFailureLines = Math.max(
+                      1,
+                      Math.ceil((item.failure_reason?.length ?? 0) / 42)
+                    );
+                    const outcomeFailureHeight = item.failure_reason
+                      ? 34 + Math.max(0, outcomeFailureLines - 1) * 16
+                      : 0;
+                    const outcomeBurnHeight = item.burn_tx_hash ? 74 : 0;
+                    const outcomeMintHeight = item.forward_tx_hash ? 74 : 0;
+                    const outcomeRowHeight = isFlipped
+                      ? 186 + outcomeBurnHeight + outcomeMintHeight + outcomeFailureHeight
+                      : 68;
 
                     return (
                       <div
                         key={item.id}
-                        className={`transform-gpu rounded-2xl border border-white/[0.08] bg-white/[0.015] p-3 transition-[transform,opacity,filter,border-color] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-white/[0.14] hover:bg-white/[0.04] ${
+                        className={`transform-gpu overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.015] transition-[transform,opacity,filter,border-color,height] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-white/[0.14] hover:bg-white/[0.04] ${
                           view === 'outcomes'
                             ? 'translate-x-0 opacity-100 brightness-100'
                             : 'translate-x-8 opacity-35 brightness-50'
                         }`}
-                        style={{ transitionDelay: `${getVisibleStaggerDelay(index, 'outcomes')}ms` }}
+                        style={{
+                          transitionDelay: `${getVisibleStaggerDelay(index, 'outcomes')}ms`,
+                          height: `${outcomeRowHeight}px`,
+                        }}
                       >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="font-num truncate text-base font-semibold leading-5 text-white">
-                              {formatUsdc(item.transfer_amount_usdc_minor)}{' '}
-                              <span className="text-gray-400">USDC</span>
-                            </p>
-                            <p className="truncate text-xs leading-4 text-gray-500">{destinationLabel}</p>
-                          </div>
-                          <div className="flex shrink-0 items-center gap-2">
-                            <WithdrawalStatusBadge status={item.status} />
-                            <button
-                              type="button"
-                              onClick={() => setSelected({ kind: 'outcome', item })}
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-100 transition hover:bg-white/10"
-                              aria-label="Open details"
-                            >
-                              <VerticalDotsIcon />
-                            </button>
+                        <div className="history-flip-scene h-full">
+                          <div className={`history-flip-card h-full ${isFlipped ? 'is-flipped' : ''}`}>
+                            <div className="history-flip-face history-flip-face--front p-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="font-num truncate text-base font-semibold leading-5 text-white">
+                                    {formatUsdc(item.transfer_amount_usdc_minor)}{' '}
+                                    <span className="text-gray-400">USDC</span>
+                                  </p>
+                                  <p className="truncate text-xs leading-4 text-gray-500">{destinationLabel}</p>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-2">
+                                  <WithdrawalStatusBadge status={item.status} />
+                                  <button
+                                    type="button"
+                                    onClick={() => setFlippedOutcomeId(item.id)}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-100 transition hover:bg-white/10"
+                                    aria-label="Show withdrawal details"
+                                  >
+                                    <VerticalDotsIcon />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="history-flip-face history-flip-face--back space-y-3 p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="font-num truncate text-sm font-semibold leading-5 text-white">
+                                    {formatUsdc(item.transfer_amount_usdc_minor)}{' '}
+                                    <span className="text-gray-400">USDC</span>
+                                  </p>
+                                  <p className="truncate text-xs leading-4 text-gray-500">Withdrawal details</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setFlippedOutcomeId(null)}
+                                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-100 transition hover:bg-white/10"
+                                  aria-label="Hide withdrawal details"
+                                >
+                                  <CloseIcon size={16} />
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div>
+                                  <p className="text-gray-500">Destination</p>
+                                  <p className="truncate text-gray-200">{destinationLabel}</p>
+                                </div>
+                                <div>
+                                  <p className="text-gray-500">Address</p>
+                                  <p className="truncate text-gray-200">
+                                    {item.dest_address ? truncateAddress(item.dest_address) : '—'}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-gray-500">Created</p>
+                                  <p className="text-gray-200">{formatDate(item.created_at)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-gray-500">Updated</p>
+                                  <p className="text-gray-200">{formatDate(item.updated_at)}</p>
+                                </div>
+                              </div>
+                              {item.burn_tx_hash ? (
+                                <div className="space-y-1 text-xs">
+                                  <p className="text-gray-500">Burn tx</p>
+                                  <p className="break-all text-gray-300">{truncateHash(item.burn_tx_hash)}</p>
+                                  <a
+                                    href={`${baseExplorer}${item.burn_tx_hash}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-block text-gray-200 hover:underline"
+                                  >
+                                    View in explorer
+                                  </a>
+                                </div>
+                              ) : null}
+                              {item.forward_tx_hash ? (
+                                <div className="space-y-1 text-xs">
+                                  <p className="text-gray-500">Mint tx</p>
+                                  <p className="break-all text-gray-300">{truncateHash(item.forward_tx_hash)}</p>
+                                  {destinationExplorerBase ? (
+                                    <a
+                                      href={`${destinationExplorerBase}${item.forward_tx_hash}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-block text-gray-200 hover:underline"
+                                    >
+                                      View in explorer
+                                    </a>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                              {item.failure_reason ? (
+                                <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2">
+                                  <p className="text-xs text-red-300">{item.failure_reason}</p>
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -663,199 +793,6 @@ export function HistoryPanel({
         </div>
       )}
 
-      {selected?.kind === 'income' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#111111] p-5 space-y-4 animate-sheet-in">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-white">Income details</h3>
-                <p className="text-sm text-gray-300">
-                  {formatUsdc(selected.item.amount_minor_units)}{' '}
-                  <span className="text-gray-400">USDC</span>
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelected(null)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/5 text-white transition hover:bg-white/10"
-                aria-label="Close details"
-                title="Close"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-
-            <StatusBadge status={selected.item.status} />
-
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <p className="text-gray-500">Source</p>
-                <p className="text-gray-200">Tournament reward</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Chain</p>
-                <p className="text-gray-200">{selected.item.chain}</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Recipient</p>
-                <p className="text-gray-200">{selected.item.recipient_email || '—'}</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Created</p>
-                <p className="text-gray-200">{formatDate(selected.item.created_at)}</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Updated</p>
-                <p className="text-gray-200">{formatDate(selected.item.updated_at)}</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Paid</p>
-                <p className="text-gray-200">{formatDate(selected.item.paid_at)}</p>
-              </div>
-            </div>
-
-            {selected.item.tx_hash && (
-              <div>
-                <p className="text-xs text-gray-500 mb-1">Transaction</p>
-                <p className="text-xs text-gray-300 break-all">{truncateHash(selected.item.tx_hash)}</p>
-                {openExplorerUrl(selected.item.chain, selected.item.tx_hash) && (
-                  <a
-                    href={openExplorerUrl(selected.item.chain, selected.item.tx_hash)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-2 inline-block text-xs text-gray-200 hover:underline"
-                  >
-                    View in explorer
-                  </a>
-                )}
-              </div>
-            )}
-
-            {selected.item.failure_reason && (
-              <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3">
-                <p className="text-xs text-red-300">{selected.item.failure_reason}</p>
-              </div>
-            )}
-
-            {(() => {
-              const payoutId = selected.item.payout_id ?? selected.item.id;
-              const canClaim =
-                selected.item.status === 'CREATED' &&
-                (!!selected.item.claim_token || !!payoutId) &&
-                !!walletAddress;
-              const claimKey =
-                selected.item.id ??
-                selected.item.payout_id ??
-                selected.item.claim_token ??
-                `${selected.item.status}-${selected.item.expires_at}`;
-              const isClaiming = claimingId === claimKey;
-
-              if (!canClaim) return null;
-
-              return (
-                <button
-                  type="button"
-                  onClick={() => void handleClaim(selected.item)}
-                  disabled={isClaiming}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-300/30 bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-100 transition-all duration-200 hover:border-emerald-200/50 hover:bg-emerald-500/22 active:translate-y-[1px] active:scale-[0.99] active:bg-emerald-500/18 disabled:opacity-60"
-                >
-                  {!isClaiming ? <CoinIcon /> : null}
-                  {isClaiming ? 'Claiming...' : 'Claim payout'}
-                </button>
-              );
-            })()}
-          </div>
-        </div>
-      )}
-
-      {selected?.kind === 'outcome' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#111111] p-5 space-y-4 animate-sheet-in">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-white">Outcome details</h3>
-                <p className="font-num text-sm text-gray-300">
-                  {formatUsdc(selected.item.transfer_amount_usdc_minor)}{' '}
-                  <span className="text-gray-400">USDC</span>
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelected(null)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/5 text-white transition hover:bg-white/10"
-                aria-label="Close details"
-                title="Close"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-
-            <WithdrawalStatusBadge status={selected.item.status} />
-
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <p className="text-gray-500">Destination</p>
-                <p className="text-gray-200">
-                  {destinations.find((dest) => dest.key === selected.item.dest_chain)?.label ??
-                    selected.item.dest_chain}
-                </p>
-              </div>
-              <div>
-                <p className="text-gray-500">Address</p>
-                <p className="text-gray-200">
-                  {selected.item.dest_address ? truncateAddress(selected.item.dest_address) : '—'}
-                </p>
-              </div>
-              <div>
-                <p className="text-gray-500">Created</p>
-                <p className="text-gray-200">{formatDate(selected.item.created_at)}</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Updated</p>
-                <p className="text-gray-200">{formatDate(selected.item.updated_at)}</p>
-              </div>
-            </div>
-
-            {selected.item.burn_tx_hash && (
-              <div>
-                <p className="text-xs text-gray-500 mb-1">Burn tx</p>
-                <p className="text-xs text-gray-300 break-all">{truncateHash(selected.item.burn_tx_hash)}</p>
-                <a
-                  href={`${baseExplorer}${selected.item.burn_tx_hash}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-2 inline-block text-xs text-gray-200 hover:underline"
-                >
-                  View in explorer
-                </a>
-              </div>
-            )}
-
-            {selected.item.forward_tx_hash && (
-              <div>
-                <p className="text-xs text-gray-500 mb-1">Mint tx</p>
-                <p className="text-xs text-gray-300 break-all">{truncateHash(selected.item.forward_tx_hash)}</p>
-                {getDestinationExplorer(selected.item.dest_chain) && (
-                  <a
-                    href={`${getDestinationExplorer(selected.item.dest_chain)}${selected.item.forward_tx_hash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-2 inline-block text-xs text-gray-200 hover:underline"
-                  >
-                    View in explorer
-                  </a>
-                )}
-              </div>
-            )}
-
-            {selected.item.failure_reason && (
-              <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3">
-                <p className="text-xs text-red-300">{selected.item.failure_reason}</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </section>
   );
 }

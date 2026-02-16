@@ -32,8 +32,6 @@ import { WithdrawStepAmount } from '@/components/withdraw/WithdrawStepAmount';
 import { WithdrawStepNetwork } from '@/components/withdraw/WithdrawStepNetwork';
 import { WithdrawStepReview } from '@/components/withdraw/WithdrawStepReview';
 import { CoinIcon } from '@/components/CoinIcon';
-import { PayoutListCard } from '@/components/PayoutListCard';
-import { StatusBadge } from '@/components/StatusBadge';
 import { useNetworkFeeEstimates } from '@/lib/useNetworkFeeEstimates';
 import { useWithdrawalQuote } from '@/lib/useWithdrawalQuote';
 import { useWithdrawalStatus } from '@/lib/useWithdrawalStatus';
@@ -111,6 +109,27 @@ function getAmountFontSize(displayValue: string): string {
   const bucket = Math.floor((length - 1) / bucketSize);
   const size = maxSize / (1 + bucket * 0.28);
   return `${size}rem`;
+}
+
+function VerticalDotsIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M12 6h.01M12 12h.01M12 18h.01"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 function buildTxUiOptions(params: {
@@ -343,7 +362,7 @@ export function WalletPanel({
   const [claimablePayoutsError, setClaimablePayoutsError] = useState<string | null>(null);
   const [claimingPayoutId, setClaimingPayoutId] = useState<string | null>(null);
   const [highlightedClaimableId, setHighlightedClaimableId] = useState<string | null>(null);
-  const [selectedPayout, setSelectedPayout] = useState<PayoutPreview | null>(null);
+  const [flippedClaimableId, setFlippedClaimableId] = useState<string | null>(null);
   const [claimablePayoutsScrolling, setClaimablePayoutsScrolling] = useState(false);
   const claimableScrollTimeoutRef = useRef<number | null>(null);
   const claimableScrollArmedRef = useRef(false);
@@ -1106,12 +1125,6 @@ export function WalletPanel({
     }
   };
 
-  const formatClaimableAmount = useCallback((item: PayoutPreview): string => {
-    if (item.amount_formatted) return item.amount_formatted;
-    const amount = item.amount_minor_units / 1_000_000;
-    return `${amount.toFixed(2)} ${item.asset}`;
-  }, []);
-
   const formatClaimablePillAmount = useCallback((item: PayoutPreview): string => {
     const amount = item.amount_minor_units / 1_000_000;
     return `${amount.toFixed(2)} ${item.asset}`;
@@ -1203,7 +1216,7 @@ export function WalletPanel({
           focusPayoutRef = confirmResponse.payout_id ?? focusPayoutRef;
         }
         await loadClaimablePayouts('background');
-        setSelectedPayout(null);
+        setFlippedClaimableId(null);
         onClaimedPayoutFocus?.({
           focusToken: item.claim_token ?? null,
           focusPayoutRef,
@@ -1301,6 +1314,21 @@ export function WalletPanel({
       window.clearTimeout(timerId);
     };
   }, [focusPayoutRef, focusToken, focusedClaimableId, withdrawOpen]);
+
+  useEffect(() => {
+    if (withdrawOpen) {
+      setFlippedClaimableId(null);
+      return;
+    }
+    if (!flippedClaimableId) return;
+    const exists = claimablePayouts.some((item) => {
+      const itemId = item.id ?? item.payout_id ?? item.claim_token ?? `${item.status}-${item.expires_at}`;
+      return itemId === flippedClaimableId;
+    });
+    if (!exists) {
+      setFlippedClaimableId(null);
+    }
+  }, [claimablePayouts, flippedClaimableId, withdrawOpen]);
 
   if (withdrawOpen) {
     const headerTitle = 'Send';
@@ -1603,147 +1631,137 @@ export function WalletPanel({
                   const canClaim = item.status === 'CREATED' && hasClaimRef && !!activeWalletAddress;
                   const isClaiming = claimingPayoutId === key;
                   const isHighlighted = highlightedClaimableId === key;
+                  const isFlipped = flippedClaimableId === key;
+                  const [amountPart, assetPart] = formatClaimablePillAmount(item).split(' ');
+                  const payoutExplorerUrl = item.tx_hash
+                    ? openPayoutExplorerUrl(item.chain, item.tx_hash)
+                    : '';
+                  const failureLines = Math.max(1, Math.ceil((item.failure_reason?.length ?? 0) / 42));
+                  const failureHeight = item.failure_reason
+                    ? 34 + Math.max(0, failureLines - 1) * 16
+                    : 0;
+                  const txHeight = item.tx_hash ? (payoutExplorerUrl ? 74 : 56) : 0;
+                  const frontHeight = canClaim ? 134 : 82;
+                  const backHeight = 208 + txHeight + failureHeight;
+                  const rowHeight = isFlipped ? backHeight : frontHeight;
+
                   return (
                     <div
                       key={key}
                       ref={(node) => {
                         claimableRowRefsRef.current[key] = node;
                       }}
-                      className={`transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+                      className={`transform-gpu overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.015] transition-[transform,opacity,filter,border-color,background-color,height] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-white/[0.14] hover:bg-white/[0.04] ${
                         isActive ? 'translate-x-0 opacity-100 brightness-100' : '-translate-x-8 opacity-35 brightness-50'
-                      }`}
-                      style={{ transitionDelay: `${Math.min(index * 45, 360)}ms` }}
+                      } ${isHighlighted ? 'history-payout-focus-flash' : ''}`}
+                      style={{
+                        transitionDelay: `${Math.min(index * 45, 360)}ms`,
+                        height: `${rowHeight}px`,
+                      }}
                     >
-                      <PayoutListCard
-                        item={item}
-                        amountLabel={formatClaimablePillAmount(item)}
-                        sourceLabel="Tournament reward"
-                        showStatus={false}
-                        variant="wallet"
-                        className={isHighlighted ? 'history-payout-focus-flash' : undefined}
-                        onDetails={() => setSelectedPayout(item)}
-                        canClaim={canClaim}
-                        isClaiming={isClaiming}
-                        onClaim={() => void handleClaimablePayoutClaim(item)}
-                      />
+                      <div className="history-flip-scene h-full">
+                        <div className={`history-flip-card h-full ${isFlipped ? 'is-flipped' : ''}`}>
+                          <div className="history-flip-face history-flip-face--front p-4">
+                            <div className="flex h-full flex-col">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="font-num truncate text-[1.75rem] font-semibold leading-none tracking-[0.02em] text-white">
+                                    {amountPart}
+                                    {assetPart ? <span className="ml-1 text-gray-400">{assetPart}</span> : null}
+                                  </p>
+                                  <p className="truncate text-xs leading-4 text-gray-500">Tournament reward</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setFlippedClaimableId(key)}
+                                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-transparent text-gray-100 transition hover:bg-white/5"
+                                  aria-label="Show payout details"
+                                >
+                                  <VerticalDotsIcon />
+                                </button>
+                              </div>
+                              {canClaim ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleClaimablePayoutClaim(item)}
+                                  disabled={isClaiming}
+                                  className="mt-4 inline-flex h-[50px] w-full items-center justify-center gap-2 rounded-xl border border-emerald-400/35 bg-emerald-500/12 text-sm font-semibold text-emerald-100 transition-all duration-200 hover:border-emerald-300/55 hover:bg-emerald-500/18 active:translate-y-[1px] active:scale-[0.99] active:bg-emerald-500/15 disabled:opacity-60"
+                                >
+                                  {!isClaiming ? <CoinIcon /> : null}
+                                  {isClaiming ? 'Claiming...' : 'Claim'}
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="history-flip-face history-flip-face--back space-y-3 p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="font-num truncate text-sm font-semibold leading-5 text-white">
+                                  {amountPart}
+                                  {assetPart ? <span className="ml-1 text-gray-400">{assetPart}</span> : null}
+                                </p>
+                                <p className="truncate text-xs leading-4 text-gray-500">Income details</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setFlippedClaimableId(null)}
+                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-100 transition hover:bg-white/10"
+                                aria-label="Hide payout details"
+                              >
+                                <X size={16} />
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div>
+                                <p className="text-gray-500">Source</p>
+                                <p className="truncate text-gray-200">Tournament reward</p>
+                              </div>
+                              <div>
+                                <p className="text-gray-500">Chain</p>
+                                <p className="truncate text-gray-200">{item.chain || '—'}</p>
+                              </div>
+                              <div>
+                                <p className="text-gray-500">Recipient</p>
+                                <p className="truncate text-gray-200">{item.recipient_email || '—'}</p>
+                              </div>
+                              <div>
+                                <p className="text-gray-500">Created</p>
+                                <p className="text-gray-200">{formatPayoutDate(item.created_at)}</p>
+                              </div>
+                              <div>
+                                <p className="text-gray-500">Paid</p>
+                                <p className="text-gray-200">{formatPayoutDate(item.paid_at)}</p>
+                              </div>
+                            </div>
+                            {item.tx_hash ? (
+                              <div className="space-y-1 text-xs">
+                                <p className="text-gray-500">Transaction</p>
+                                <p className="break-all text-gray-300">{truncateHash(item.tx_hash)}</p>
+                                {payoutExplorerUrl ? (
+                                  <a
+                                    href={payoutExplorerUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-block text-gray-200 hover:underline"
+                                  >
+                                    View in explorer
+                                  </a>
+                                ) : null}
+                              </div>
+                            ) : null}
+                            {item.failure_reason ? (
+                              <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2">
+                                <p className="text-xs text-red-300">{item.failure_reason}</p>
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
               </div>
-          )}
-          </div>
-        </div>
-      )}
-
-      {selectedPayout && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#111111] p-5 space-y-4 animate-sheet-in">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-white">Payout details</h3>
-                <p className="text-sm text-gray-300">
-                  {(() => {
-                    const [amountPart, assetPart] = formatClaimableAmount(selectedPayout).split(' ');
-                    return (
-                      <>
-                        {amountPart}
-                        {assetPart ? <span className="ml-1 text-gray-400">{assetPart}</span> : null}
-                      </>
-                    );
-                  })()}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedPayout(null)}
-                className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1 text-xs text-gray-100 transition hover:bg-white/10"
-              >
-                Close
-              </button>
-            </div>
-
-            <StatusBadge status={selectedPayout.status} />
-
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <p className="text-gray-500">Source</p>
-                <p className="text-gray-200">Tournament reward</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Chain</p>
-                <p className="text-gray-200">{selectedPayout.chain}</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Recipient</p>
-                <p className="text-gray-200">{selectedPayout.recipient_email || '—'}</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Created</p>
-                <p className="text-gray-200">{formatPayoutDate(selectedPayout.created_at)}</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Updated</p>
-                <p className="text-gray-200">{formatPayoutDate(selectedPayout.updated_at)}</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Claimed</p>
-                <p className="text-gray-200">{formatPayoutDate(selectedPayout.claimed_at)}</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Paid</p>
-                <p className="text-gray-200">{formatPayoutDate(selectedPayout.paid_at)}</p>
-              </div>
-            </div>
-
-            {selectedPayout.tx_hash && (
-              <div>
-                <p className="text-xs text-gray-500 mb-1">Transaction</p>
-                <p className="text-xs text-gray-300 break-all">{truncateHash(selectedPayout.tx_hash)}</p>
-                {openPayoutExplorerUrl(selectedPayout.chain, selectedPayout.tx_hash) && (
-                  <a
-                    href={openPayoutExplorerUrl(selectedPayout.chain, selectedPayout.tx_hash)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-2 inline-block text-xs text-gray-200 hover:underline"
-                  >
-                    View in explorer
-                  </a>
-                )}
-              </div>
             )}
-
-            {selectedPayout.failure_reason && (
-              <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3">
-                <p className="text-xs text-red-300">{selectedPayout.failure_reason}</p>
-              </div>
-            )}
-
-            {(() => {
-              const selectedId =
-                selectedPayout.id ??
-                selectedPayout.payout_id ??
-                selectedPayout.claim_token ??
-                `${selectedPayout.status}-${selectedPayout.expires_at}`;
-              const hasClaimRef =
-                !!selectedPayout.claim_token || !!selectedPayout.payout_id || !!selectedPayout.id;
-              const canClaim =
-                selectedPayout.status === 'CREATED' && hasClaimRef && !!activeWalletAddress;
-              const isClaiming = claimingPayoutId === selectedId;
-
-              if (!canClaim) return null;
-
-              return (
-                <button
-                  type="button"
-                  onClick={() => void handleClaimablePayoutClaim(selectedPayout)}
-                  disabled={isClaiming}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-300/30 bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-100 transition-all duration-200 hover:border-emerald-200/50 hover:bg-emerald-500/22 active:translate-y-[1px] active:scale-[0.99] active:bg-emerald-500/18 disabled:opacity-60"
-                >
-                  {!isClaiming ? <CoinIcon /> : null}
-                  {isClaiming ? 'Claiming...' : 'Claim payout'}
-                </button>
-              );
-            })()}
           </div>
         </div>
       )}

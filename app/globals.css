@@ -146,6 +146,52 @@ body {
   animation: historyPayoutFocusFlash 2800ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.history-flip-scene {
+  perspective: 1100px;
+}
+
+.history-flip-card {
+  position: relative;
+  width: 100%;
+  transform-style: preserve-3d;
+  transition: transform 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.history-flip-card.is-flipped {
+  transform: rotateY(180deg);
+}
+
+.history-flip-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transition: opacity 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.history-flip-face--front {
+  transform: rotateY(0deg) translateZ(0.1px);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.history-flip-face--back {
+  transform: rotateY(180deg) translateZ(0.1px);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.history-flip-card.is-flipped .history-flip-face--front {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.history-flip-card.is-flipped .history-flip-face--back {
+  opacity: 1;
+  pointer-events: auto;
+  transition-delay: 110ms;
+}
+
 .transient-scrollbar {
   overflow-y: auto;
   scrollbar-gutter: stable;
@@ -186,6 +232,14 @@ body {
   .animate-history-refresh-spin,
   .history-payout-focus-flash {
     animation: none;
+  }
+
+  .history-flip-card {
+    transition: none;
+  }
+
+  .history-flip-face {
+    transition: none;
   }
 }
 
