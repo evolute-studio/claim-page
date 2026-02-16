@@ -281,7 +281,13 @@ function NetworkIcon({
 type AmountMode = 'receive' | 'pay';
 type WithdrawStep = 1 | 2 | 4;
 
-export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
+export function WalletPanel({
+  isActive = true,
+  onClaimedPayoutFocus,
+}: {
+  isActive?: boolean;
+  onClaimedPayoutFocus?: (next: { focusToken?: string | null; focusPayoutRef?: string | null }) => void;
+}) {
   const { wallets } = useWallets();
   const { identityToken } = useIdentityToken();
   const { sendTransaction } = useSendTransaction();
@@ -1162,6 +1168,7 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
       const itemId = item.id ?? item.payout_id ?? item.claim_token ?? null;
       const payoutId = item.payout_id ?? item.id;
       if (!item.claim_token && !payoutId) return;
+      let focusPayoutRef: string | null = payoutId ?? item.id ?? item.claim_token ?? null;
 
       setClaimingPayoutId(itemId);
       setClaimablePayoutsError(null);
@@ -1169,7 +1176,8 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
         const token = await getAuthToken();
         if (item.claim_token) {
           try {
-            await confirmClaim(item.claim_token, activeWalletAddress, token);
+            const confirmResponse = await confirmClaim(item.claim_token, activeWalletAddress, token);
+            focusPayoutRef = confirmResponse.payout_id ?? focusPayoutRef;
           } catch (claimByTokenError) {
             const message =
               claimByTokenError instanceof Error ? claimByTokenError.message : 'Claim failed';
@@ -1177,12 +1185,19 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
             if (!canRetryById) {
               throw claimByTokenError;
             }
-            await confirmClaimByPayoutId(payoutId, activeWalletAddress, token);
+            const confirmResponse = await confirmClaimByPayoutId(payoutId, activeWalletAddress, token);
+            focusPayoutRef = confirmResponse.payout_id ?? focusPayoutRef;
           }
         } else if (payoutId) {
-          await confirmClaimByPayoutId(payoutId, activeWalletAddress, token);
+          const confirmResponse = await confirmClaimByPayoutId(payoutId, activeWalletAddress, token);
+          focusPayoutRef = confirmResponse.payout_id ?? focusPayoutRef;
         }
         await loadClaimablePayouts('background');
+        setSelectedPayout(null);
+        onClaimedPayoutFocus?.({
+          focusToken: item.claim_token ?? null,
+          focusPayoutRef,
+        });
       } catch (claimError) {
         const message = claimError instanceof Error ? claimError.message : 'Claim failed';
         setClaimablePayoutsError(
@@ -1194,7 +1209,7 @@ export function WalletPanel({ isActive = true }: { isActive?: boolean }) {
         setClaimingPayoutId(null);
       }
     },
-    [activeWalletAddress, getAuthToken, loadClaimablePayouts]
+    [activeWalletAddress, getAuthToken, loadClaimablePayouts, onClaimedPayoutFocus]
   );
 
   useEffect(() => {

@@ -28,6 +28,8 @@ type HistorySelected =
 const VIEW_STAGGER_STEP_MS = 45;
 const VIEW_STAGGER_MAX_MS = 360;
 const VIEW_STAGGER_ROW_PX = 92;
+const PAYOUT_HIGHLIGHT_DURATION_MS = 2800;
+const PAYOUT_HIGHLIGHT_SCROLL_DELAY_MS = 90;
 
 function formatUsdc(minor: number): string {
   return (minor / 1_000_000).toFixed(2);
@@ -104,9 +106,11 @@ function CloseIcon({ size = 18 }: { size?: number }) {
 
 export function HistoryPanel({
   focusToken,
+  focusPayoutRef,
   isActive = true,
 }: {
   focusToken?: string | null;
+  focusPayoutRef?: string | null;
   isActive?: boolean;
 }) {
   const { identityToken } = useIdentityToken();
@@ -123,17 +127,22 @@ export function HistoryPanel({
   const [withdrawals, setWithdrawals] = useState<WithdrawalListItem[]>([]);
   const [selected, setSelected] = useState<HistorySelected | null>(null);
   const [claimingId, setClaimingId] = useState<string | null>(null);
+  const [highlightedIncomeId, setHighlightedIncomeId] = useState<string | null>(null);
   const [incomesScrolling, setIncomesScrolling] = useState(false);
   const [outcomesScrolling, setOutcomesScrolling] = useState(false);
   const incomesScrollTimeoutRef = useRef<number | null>(null);
   const outcomesScrollTimeoutRef = useRef<number | null>(null);
+  const highlightIncomeTimeoutRef = useRef<number | null>(null);
   const incomesScrollArmedRef = useRef(false);
   const outcomesScrollArmedRef = useRef(false);
   const identityTokenRef = useRef<string | null>(identityToken ?? null);
   const didInitialLoadRef = useRef(false);
   const incomesListRef = useRef<HTMLDivElement | null>(null);
   const outcomesListRef = useRef<HTMLDivElement | null>(null);
+  const incomeRowRefsRef = useRef<Record<string, HTMLDivElement | null>>({});
   const pendingScrollRestoreRef = useRef<{ incomes: number; outcomes: number } | null>(null);
+  const lastHandledFocusSignatureRef = useRef<string | null>(null);
+  const lastFocusRefreshSignatureRef = useRef<string | null>(null);
   const refreshSpinHasFullTurnRef = useRef(false);
   const refreshSpinStopRequestedRef = useRef(false);
 
@@ -175,14 +184,6 @@ export function HistoryPanel({
         setPayouts(payoutData.payouts);
         setWithdrawals(withdrawalData.withdrawals);
         setError(null);
-
-        if (focusToken) {
-          const focused = payoutData.payouts.find((item) => item.claim_token === focusToken);
-          if (focused) {
-            setView('incomes');
-            setSelected({ kind: 'income', item: focused });
-          }
-        }
       } catch (requestError) {
         const message =
           requestError instanceof Error ? requestError.message : 'Failed to load history';
@@ -195,7 +196,7 @@ export function HistoryPanel({
         }
       }
     },
-    [focusToken, getAuthToken]
+    [getAuthToken]
   );
 
   useEffect(() => {
@@ -203,6 +204,15 @@ export function HistoryPanel({
     didInitialLoadRef.current = true;
     void loadHistory('initial');
   }, [loadHistory]);
+
+  useEffect(() => {
+    if (!focusToken && !focusPayoutRef) return;
+    if (loading) return;
+    const signature = `${focusToken ?? ''}|${focusPayoutRef ?? ''}`;
+    if (lastFocusRefreshSignatureRef.current === signature) return;
+    lastFocusRefreshSignatureRef.current = signature;
+    void loadHistory('background');
+  }, [focusPayoutRef, focusToken, loadHistory, loading]);
 
   useEffect(() => {
     if (loading) return;
@@ -237,6 +247,47 @@ export function HistoryPanel({
       ),
     [withdrawals]
   );
+  const focusedIncomeId = useMemo(() => {
+    const focused = incomes.find((item) => {
+      if (focusPayoutRef) {
+        if (item.id === focusPayoutRef) return true;
+        if (item.payout_id === focusPayoutRef) return true;
+        if (item.claim_token === focusPayoutRef) return true;
+      }
+      if (focusToken && item.claim_token === focusToken) return true;
+      return false;
+    });
+    if (!focused) return null;
+    return focused.id ?? focused.payout_id ?? focused.claim_token ?? `${focused.status}-${focused.expires_at}`;
+  }, [focusPayoutRef, focusToken, incomes]);
+
+  useEffect(() => {
+    if (!focusedIncomeId) return;
+    const focusSignature = `${focusToken ?? ''}|${focusPayoutRef ?? ''}|${focusedIncomeId}`;
+    if (lastHandledFocusSignatureRef.current === focusSignature) return;
+    lastHandledFocusSignatureRef.current = focusSignature;
+
+    setView('incomes');
+    setSelected(null);
+
+    const timerId = window.setTimeout(() => {
+      const row = incomeRowRefsRef.current[focusedIncomeId];
+      if (row) {
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+      setHighlightedIncomeId(focusedIncomeId);
+      if (highlightIncomeTimeoutRef.current) {
+        window.clearTimeout(highlightIncomeTimeoutRef.current);
+      }
+      highlightIncomeTimeoutRef.current = window.setTimeout(() => {
+        setHighlightedIncomeId((current) => (current === focusedIncomeId ? null : current));
+      }, PAYOUT_HIGHLIGHT_DURATION_MS);
+    }, PAYOUT_HIGHLIGHT_SCROLL_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [focusPayoutRef, focusToken, focusedIncomeId]);
 
   const handleClaim = useCallback(
     async (item: PayoutPreview) => {
@@ -347,6 +398,9 @@ export function HistoryPanel({
       }
       if (outcomesScrollTimeoutRef.current) {
         window.clearTimeout(outcomesScrollTimeoutRef.current);
+      }
+      if (highlightIncomeTimeoutRef.current) {
+        window.clearTimeout(highlightIncomeTimeoutRef.current);
       }
       incomesScrollArmedRef.current = false;
       outcomesScrollArmedRef.current = false;
@@ -508,14 +562,18 @@ export function HistoryPanel({
                   {incomes.map((item, index) => {
                     const itemId =
                       item.id ?? item.payout_id ?? item.claim_token ?? `${item.status}-${item.expires_at}`;
+                    const isHighlighted = highlightedIncomeId === itemId;
                     return (
                       <div
                         key={itemId}
+                        ref={(node) => {
+                          incomeRowRefsRef.current[itemId] = node;
+                        }}
                         className={`transform-gpu rounded-2xl border border-white/[0.08] bg-white/[0.015] p-3 transition-[transform,opacity,filter,border-color] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-white/[0.14] hover:bg-white/[0.04] ${
                           view === 'incomes'
                             ? 'translate-x-0 opacity-100 brightness-100'
                             : '-translate-x-8 opacity-35 brightness-50'
-                        }`}
+                        } ${isHighlighted ? 'history-payout-focus-flash' : ''}`}
                         style={{ transitionDelay: `${getVisibleStaggerDelay(index, 'incomes')}ms` }}
                       >
                         <div className="flex items-center justify-between gap-3">

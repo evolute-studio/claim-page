@@ -83,6 +83,21 @@ body {
   }
 }
 
+@keyframes historyPayoutFocusFlash {
+  0%,
+  100% {
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+  8%,
+  44% {
+    border-color: rgba(255, 255, 255, 0.92);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.24),
+      0 0 18px rgba(255, 255, 255, 0.12);
+  }
+}
+
 .animate-slide-in {
   animation: slideIn 180ms ease-out;
 }
@@ -124,6 +139,10 @@ body {
   animation: historyRefreshSpin 800ms linear infinite;
 }
 
+.history-payout-focus-flash {
+  animation: historyPayoutFocusFlash 2800ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 .transient-scrollbar {
   overflow-y: auto;
   scrollbar-gutter: stable;
@@ -161,7 +180,8 @@ body {
   .animate-history-view-in,
   .animate-history-view-slide-left,
   .animate-history-view-slide-right,
-  .animate-history-refresh-spin {
+  .animate-history-refresh-spin,
+  .history-payout-focus-flash {
     animation: none;
   }
 }

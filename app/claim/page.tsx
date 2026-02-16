@@ -94,8 +94,12 @@ function ClaimContent() {
 
   useEffect(() => {
     if (!ready || !authenticated) return;
-    router.replace('/app');
-  }, [authenticated, ready, router]);
+    if (token) {
+      router.replace(`/app?tab=history&focusToken=${encodeURIComponent(token)}`);
+      return;
+    }
+    router.replace('/app?tab=history');
+  }, [authenticated, ready, router, token]);
 
   useEffect(() => {
     const requestId = ++previewRequestIdRef.current;
@@ -304,7 +308,7 @@ function ClaimContent() {
             {ready ? 'Continue with Privy' : 'Loading...'}
           </button>
 
-          <p className="mt-3 text-xs text-gray-500">You will be redirected to your wallet.</p>
+          <p className="mt-3 text-xs text-gray-500">You will be redirected to your history.</p>
         </section>
       </div>
     </div>

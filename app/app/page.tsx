@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { UserPill } from '@privy-io/react-auth/ui';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
@@ -84,10 +84,12 @@ export default function AppPage() {
   const { wallets } = useWallets();
   const { ready, authenticated } = usePrivy();
   const [focusToken, setFocusToken] = useState<string | null>(null);
+  const [focusPayoutRef, setFocusPayoutRef] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>('wallet');
   const [copied, setCopied] = useState(false);
   const [isMenuPressed, setIsMenuPressed] = useState(false);
   const queryFocusToken = searchParams.get('focusToken');
+  const queryFocusPayout = searchParams.get('focusPayout');
   const queryTab = searchParams.get('tab');
   const walletAddress = wallets[0]?.address ?? null;
 
@@ -103,11 +105,12 @@ export default function AppPage() {
   }, [ready, authenticated, router]);
 
   useEffect(() => {
-    if (!queryFocusToken) return;
-    setFocusToken((current) => current ?? queryFocusToken);
+    if (!queryFocusToken && !queryFocusPayout) return;
+    setFocusToken(queryFocusToken);
+    setFocusPayoutRef(queryFocusPayout);
     setActiveTab('history');
     routerRef.current.replace('/app?tab=history');
-  }, [queryFocusToken]);
+  }, [queryFocusPayout, queryFocusToken]);
 
   useEffect(() => {
     if (queryTab === 'wallet' || queryTab === 'history') {
@@ -124,6 +127,16 @@ export default function AppPage() {
     setActiveTab(tab);
     router.replace(`/app?tab=${tab}`);
   };
+
+  const handleClaimedPayoutFocus = useCallback(
+    (next: { focusToken?: string | null; focusPayoutRef?: string | null }) => {
+      setFocusToken(next.focusToken ?? null);
+      setFocusPayoutRef(next.focusPayoutRef ?? null);
+      setActiveTab('history');
+      router.replace('/app?tab=history');
+    },
+    [router]
+  );
 
   const handleCopyWalletAddress = async () => {
     if (!walletAddress) return;
@@ -251,14 +264,21 @@ export default function AppPage() {
                 activeTab === 'wallet' ? 'pointer-events-auto' : 'pointer-events-none'
               }`}
             >
-              <WalletPanel isActive={activeTab === 'wallet'} />
+              <WalletPanel
+                isActive={activeTab === 'wallet'}
+                onClaimedPayoutFocus={handleClaimedPayoutFocus}
+              />
             </div>
             <div
               className={`h-full min-h-0 w-1/2 px-1 ${
                 activeTab === 'history' ? 'pointer-events-auto' : 'pointer-events-none'
               }`}
             >
-              <HistoryPanel focusToken={focusToken ?? queryFocusToken} isActive={activeTab === 'history'} />
+              <HistoryPanel
+                focusToken={focusToken ?? queryFocusToken}
+                focusPayoutRef={focusPayoutRef ?? queryFocusPayout}
+                isActive={activeTab === 'history'}
+              />
             </div>
           </div>
         </div>
