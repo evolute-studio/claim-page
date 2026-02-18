@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import { Clipboard } from 'lucide-react';
+import { formatUnits } from 'viem';
 import { formatUsdc } from '@/lib/withdraw';
 import { truncateAddress } from '@/lib/format';
 import type { DestinationChain, WithdrawalQuoteResponse, WithdrawalStatus } from '@/types/withdrawal';
@@ -14,6 +15,15 @@ type NetworkIconProps = {
   chainName: string;
   size?: number;
 };
+
+function getAmountFontSize(displayValue: string): string {
+  const length = displayValue.replace('.', '').length || 1;
+  const maxSize = 3.2;
+  const bucketSize = 6;
+  const bucket = Math.floor((length - 1) / bucketSize);
+  const size = maxSize / (1 + bucket * 0.28);
+  return `${size}rem`;
+}
 
 type WithdrawStepReviewProps = {
   destinationAddress: string;
@@ -95,6 +105,9 @@ export function WithdrawStepReview({
       : displayQuote
         ? displayQuote.total_burn_usdc_minor
         : derivedPayMinor;
+  const youPayDisplay = youPayMinor !== null ? formatUnits(BigInt(youPayMinor), 6) : '0.00';
+  const youPayFontSize = getAmountFontSize(`${youPayDisplay}USDC`);
+  const hasYouPayFractionPart = youPayDisplay.includes('.');
 
   return (
     <div className="flex flex-1 flex-col justify-between pb-6 pt-4 animate-slide-in">
@@ -143,10 +156,28 @@ export function WithdrawStepReview({
 
         <div className="space-y-4 rounded-2xl border border-white/[0.14] bg-white/[0.03] p-5">
           <div className="text-center">
-            <p className="font-num text-[3rem] font-semibold tracking-[0.02em] text-white">
-              {youPayMinor !== null ? formatUsdc(youPayMinor) : '0.00'}{' '}
-              <span className="text-gray-400">USDC</span>
-            </p>
+            <div className="flex w-full items-center justify-center">
+              <div
+                style={{
+                  fontSize: youPayFontSize,
+                  lineHeight: '1.05',
+                  padding: '0.18em',
+                }}
+                className="inline-flex items-baseline justify-center whitespace-nowrap"
+              >
+                <span
+                  style={{
+                    marginRight: hasYouPayFractionPart ? '0.14em' : '0.22em',
+                  }}
+                  className="font-num font-semibold tracking-[0.04em] text-white"
+                >
+                  {youPayDisplay}
+                </span>
+                <span className="font-semibold text-gray-400">
+                  USDC
+                </span>
+              </div>
+            </div>
           </div>
           <div className="space-y-2.5 text-[17px] text-gray-300">
             <div className="flex items-center justify-between">
@@ -198,7 +229,7 @@ export function WithdrawStepReview({
                     <span
                       className={`font-num inline-flex h-[26px] min-w-[56px] shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-2.5 text-[11px] transition-[color,background-color,border-color,box-shadow] duration-300 ${
                         isQuoteDanger
-                          ? 'withdraw-quote-danger-pulse border-red-500/55 bg-red-500/16 text-red-100'
+                          ? 'withdraw-quote-danger-text-pulse withdraw-quote-danger-pill-pulse border-red-500/80 bg-red-500/12 text-red-100'
                           : 'border-white/10 bg-white/[0.04] text-gray-400'
                       }`}
                     >
@@ -207,7 +238,7 @@ export function WithdrawStepReview({
                   </div>
                   <span
                     className={`font-num shrink-0 transition-colors duration-300 ${
-                      isQuoteDanger ? 'text-red-300 withdraw-quote-danger-pulse' : 'text-white'
+                      isQuoteDanger ? 'text-red-200 withdraw-quote-danger-text-pulse' : 'text-white'
                     }`}
                   >
                     {formatUsdc(displayQuote.max_fee_usdc_minor)}{' '}
