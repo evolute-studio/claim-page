@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { UserPill } from '@privy-io/react-auth/ui';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
-import { Copy } from 'lucide-react';
+import { Check, Copy } from 'lucide-react';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { WalletPanel } from '@/components/WalletPanel';
 import { HistoryPanel } from '@/components/HistoryPanel';
@@ -16,15 +16,15 @@ function AccountIcon() {
   return (
     <svg
       viewBox="0 0 24 24"
-      className="mt-0.5 h-5 w-5 text-gray-300"
+      className="h-[21px] w-[21px] shrink-0 text-gray-300"
       fill="none"
       aria-hidden="false"
     >
-      <circle cx="12" cy="8" r="3.5" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="12" cy="8" r="3.5" stroke="currentColor" strokeWidth="2.1" />
       <path
         d="M5.5 18a6.5 6.5 0 0 1 13 0"
         stroke="currentColor"
-        strokeWidth="1.8"
+        strokeWidth="2.1"
         strokeLinecap="round"
       />
     </svg>
@@ -159,7 +159,7 @@ export default function AppPage() {
         }
       }
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
+      window.setTimeout(() => setCopied(false), 1800);
     } catch {
       setCopied(false);
     }
@@ -184,33 +184,57 @@ export default function AppPage() {
           <div className="flex items-center justify-between gap-3">
             <button
               type="button"
-              className="inline-flex h-10 min-w-0 max-w-[70%] items-center justify-center gap-1 rounded-full border border-white/15 bg-white/5 px-3 transition hover:bg-white/10"
+              onClick={() => void handleCopyWalletAddress()}
+              disabled={!walletAddress}
+              className={`relative inline-flex h-10 min-w-0 max-w-[70%] items-center justify-center gap-2 rounded-full border bg-white/5 px-3 transition-[background-color,border-color,color,transform,opacity] duration-300 ease-out ${
+                walletAddress
+                  ? 'cursor-copy border-white/15 hover:border-white/25 hover:bg-white/10'
+                  : 'cursor-default border-white/10 opacity-70'
+              }`}
+              aria-label="Copy wallet address"
+              title={copied ? 'Copied' : 'Copy address'}
             >
               <span className="inline-flex min-w-0 items-center gap-1 overflow-hidden">
                 <AccountIcon />
-                <span className="text-base font-semibold text-white">
+                <span className="truncate text-base font-semibold text-white">
                   {walletAddress ? truncateAddress(walletAddress) : '—'}
                 </span>
               </span>
+              {walletAddress ? (
+                <span
+                  className={`relative inline-flex h-5 w-5 shrink-0 self-center items-center justify-center transition-colors duration-300 ease-out ${
+                    copied ? 'text-emerald-300' : 'text-gray-400'
+                  }`}
+                  aria-hidden="true"
+                >
+                  <span
+                    className={`absolute left-1/2 top-1/2 inline-flex -translate-x-1/2 -translate-y-1/2 items-center justify-center transition-opacity duration-[320ms] ease-out ${
+                      copied ? 'opacity-0' : 'opacity-100'
+                    }`}
+                  >
+                    <Copy size={16} strokeWidth={1.9} className="block" />
+                  </span>
+                  <span
+                    className={`absolute left-1/2 top-1/2 inline-flex -translate-x-1/2 -translate-y-1/2 items-center justify-center transition-opacity duration-[320ms] ease-out ${
+                      copied ? 'opacity-100' : 'opacity-0'
+                    }`}
+                  >
+                    <Check size={16} strokeWidth={2.1} className="block" />
+                  </span>
+                </span>
+              ) : null}
+              {walletAddress ? (
+                <span
+                  className={`pointer-events-none absolute left-[calc(100%+0.5rem)] top-1/2 z-20 -translate-y-1/2 whitespace-nowrap rounded-lg border border-white/20 bg-white px-2.5 py-1 text-xs font-medium text-black shadow-[0_8px_22px_rgba(0,0,0,0.35)] transition-[opacity,transform,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+                    copied ? 'translate-x-0 opacity-100 blur-0' : 'translate-x-2 opacity-0 blur-[1.5px]'
+                  }`}
+                >
+                  Copied
+                </span>
+              ) : null}
             </button>
 
             <div className="relative flex items-center gap-2">
-              {walletAddress && (
-                <button
-                  type="button"
-                  onClick={handleCopyWalletAddress}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-200 transition hover:bg-white/10"
-                  aria-label="Copy wallet address"
-                  title={copied ? 'Copied' : 'Copy address'}
-                >
-                  <Copy size={16} strokeWidth={1.9} className="block" aria-hidden="true" />
-                </button>
-              )}
-              {copied && (
-                <div className="pointer-events-none absolute right-[calc(100%+0.5rem)] top-1/2 z-20 -translate-y-1/2 whitespace-nowrap rounded-lg border border-white/20 bg-white px-2.5 py-1 text-xs font-medium text-black">
-                  Copied
-                </div>
-              )}
               <div
                 className="group relative h-10 w-10"
                 onPointerDownCapture={() => setIsMenuPressed(true)}
