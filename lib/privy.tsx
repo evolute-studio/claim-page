@@ -28,8 +28,11 @@ export function PrivyProviderWrapper({ children }: { children: React.ReactNode }
         loginMethods: ['email'],
         appearance: {
           theme: 'dark',
-          accentColor: '#f5f5f5',
+          accentColor: '#38bdf8',
           logo: '/logo.png',
+          landingHeader: 'Sign in',
+          loginMessage: 'Continue with email',
+          showWalletLoginFirst: false,
         },
         embeddedWallets: {
           ethereum: {

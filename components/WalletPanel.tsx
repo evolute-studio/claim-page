@@ -344,7 +344,7 @@ export function WalletPanel({
     return token;
   }, []);
 
-  const [amountMode] = useState<AmountMode>('receive');
+  const [amountMode] = useState<AmountMode>('pay');
   const [amountInput, setAmountInput] = useState('');
   const [destination, setDestination] = useState<DestinationChain>('base');
   const [destinationAddress, setDestinationAddress] = useState('');
@@ -617,6 +617,10 @@ export function WalletPanel({
     !sending &&
     !!quoteExpiresAtMs &&
     Date.now() - quoteExpiresAtMs >= 5_000;
+  const quoteSecondsRemaining =
+    quoteExpiresAtMs === null
+      ? null
+      : Math.max(0, Math.floor((quoteExpiresAtMs - Date.now()) / 1000));
   const belowMinReceive =
     effectiveParsedInputAmount !== null &&
     effectiveParsedInputAmount > 0n &&
@@ -700,9 +704,10 @@ export function WalletPanel({
   }, [destination, quote, selectedFeeEstimateMinor]);
   const maxReceivableMinor = useMemo(() => {
     if (balanceMinor === null) return null;
+    if (amountMode === 'pay') return balanceMinor;
     if (destination === 'base') return balanceMinor;
     return balanceMinor > availabilityFeeMinor ? balanceMinor - availabilityFeeMinor : 0n;
-  }, [availabilityFeeMinor, balanceMinor, destination]);
+  }, [amountMode, availabilityFeeMinor, balanceMinor, destination]);
   const formattedMaxReceivable = useMemo(() => {
     if (maxReceivableMinor === null) return null;
     const numeric = Number(formatUnits(maxReceivableMinor, 6));
@@ -1454,17 +1459,15 @@ export function WalletPanel({
                 hasDestinationAddressError={hasDestinationAddressError}
                 isDestinationAddressValid={isDestinationAddressValid}
                 destinationAddressTrimmed={destinationAddressTrimmed}
-                lockedAmountMode={lockedAmountMode}
                 amountMode={amountMode}
                 derivedPayMinor={derivedPayMinor}
-                lockedQuote={lockedQuote}
                 derivedReceiveMinor={derivedReceiveMinor}
                 isQuoteLocked={isQuoteLocked}
                 quoteTimeRemaining={quoteTimeRemaining}
+                quoteSecondsRemaining={quoteSecondsRemaining}
                 destinationConfig={destinationConfig}
                 destination={destination}
                 NetworkIcon={NetworkIcon}
-                quoteLoading={quoteLoading}
                 displayQuote={displayQuote}
                 quoteError={quoteError}
                 displayMode={displayMode}
@@ -1632,18 +1635,18 @@ export function WalletPanel({
                   const isClaiming = claimingPayoutId === key;
                   const isHighlighted = highlightedClaimableId === key;
                   const isFlipped = flippedClaimableId === key;
+                  const tournamentName =
+                    item.tournament_name && item.tournament_name.trim()
+                      ? item.tournament_name.trim()
+                      : 'Tournament';
                   const [amountPart, assetPart] = formatClaimablePillAmount(item).split(' ');
+                  const amountLabel = assetPart ? `${amountPart} ${assetPart}` : amountPart;
                   const payoutExplorerUrl = item.tx_hash
                     ? openPayoutExplorerUrl(item.chain, item.tx_hash)
                     : '';
-                  const failureLines = Math.max(1, Math.ceil((item.failure_reason?.length ?? 0) / 42));
-                  const failureHeight = item.failure_reason
-                    ? 34 + Math.max(0, failureLines - 1) * 16
-                    : 0;
-                  const txHeight = item.tx_hash ? (payoutExplorerUrl ? 74 : 56) : 0;
-                  const frontHeight = canClaim ? 134 : 82;
-                  const backHeight = 208 + txHeight + failureHeight;
-                  const rowHeight = isFlipped ? backHeight : frontHeight;
+                  const issuedDate = formatPayoutDate(item.created_at);
+                  const frontHeight = canClaim ? 134 : 96;
+                  const rowHeight = frontHeight;
 
                   return (
                     <div
@@ -1651,7 +1654,7 @@ export function WalletPanel({
                       ref={(node) => {
                         claimableRowRefsRef.current[key] = node;
                       }}
-                      className={`transform-gpu overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.015] transition-[transform,opacity,filter,border-color,background-color,height] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-white/[0.14] hover:bg-white/[0.04] ${
+                      className={`group transform-gpu overflow-hidden rounded-2xl transition-[transform,opacity,filter,height] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
                         isActive ? 'translate-x-0 opacity-100 brightness-100' : '-translate-x-8 opacity-35 brightness-50'
                       } ${isHighlighted ? 'history-payout-focus-flash' : ''}`}
                       style={{
@@ -1661,7 +1664,7 @@ export function WalletPanel({
                     >
                       <div className="history-flip-scene h-full">
                         <div className={`history-flip-card h-full ${isFlipped ? 'is-flipped' : ''}`}>
-                          <div className="history-flip-face history-flip-face--front p-4">
+                          <div className="history-flip-face history-flip-face--front claimable-metal-pill rounded-2xl border border-white/[0.08] p-4 transition-colors duration-200 group-hover:border-white/[0.14]">
                             <div className="flex h-full flex-col">
                               <div className="flex items-center justify-between gap-3">
                                 <div className="min-w-0">
@@ -1674,7 +1677,7 @@ export function WalletPanel({
                                 <button
                                   type="button"
                                   onClick={() => setFlippedClaimableId(key)}
-                                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-transparent text-gray-100 transition hover:bg-white/5"
+                                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/30 bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.22)] transition hover:border-white/45 hover:bg-white/15"
                                   aria-label="Show payout details"
                                 >
                                   <VerticalDotsIcon />
@@ -1685,7 +1688,7 @@ export function WalletPanel({
                                   type="button"
                                   onClick={() => void handleClaimablePayoutClaim(item)}
                                   disabled={isClaiming}
-                                  className="mt-4 inline-flex h-[50px] w-full items-center justify-center gap-2 rounded-xl border border-emerald-400/35 bg-emerald-500/12 text-sm font-semibold text-emerald-100 transition-all duration-200 hover:border-emerald-300/55 hover:bg-emerald-500/18 active:translate-y-[1px] active:scale-[0.99] active:bg-emerald-500/15 disabled:opacity-60"
+                                  className="claimable-cta-button mt-4 inline-flex h-[50px] w-full items-center justify-center gap-2 rounded-xl border text-sm font-semibold transition-all duration-200 active:translate-y-[1px] active:scale-[0.99] disabled:opacity-60"
                                 >
                                   {!isClaiming ? <CoinIcon /> : null}
                                   {isClaiming ? 'Claiming...' : 'Claim'}
@@ -1693,14 +1696,14 @@ export function WalletPanel({
                               ) : null}
                             </div>
                           </div>
-                          <div className="history-flip-face history-flip-face--back space-y-3 p-4">
+                          <div className="history-flip-face history-flip-face--back claimable-flip-face--back space-y-2 rounded-2xl border border-white/[0.08] bg-white/[0.015] p-4 transition-colors duration-200 group-hover:border-white/[0.14] group-hover:bg-white/[0.04]">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <p className="font-num truncate text-sm font-semibold leading-5 text-white">
+                                <p className="font-num truncate text-[clamp(1.42rem,3.4vw,1.58rem)] font-semibold leading-7 text-white">
                                   {amountPart}
                                   {assetPart ? <span className="ml-1 text-gray-400">{assetPart}</span> : null}
                                 </p>
-                                <p className="truncate text-xs leading-4 text-gray-500">Income details</p>
+                                <p className="truncate text-[clamp(0.95rem,2.4vw,1.1rem)] leading-5 text-gray-500">Claim</p>
                               </div>
                               <button
                                 type="button"
@@ -1711,47 +1714,39 @@ export function WalletPanel({
                                 <X size={16} />
                               </button>
                             </div>
-                            <div className="grid grid-cols-2 gap-2 text-xs">
-                              <div>
-                                <p className="text-gray-500">Source</p>
-                                <p className="truncate text-gray-200">Tournament reward</p>
+                            <div className="space-y-1 text-[clamp(0.95rem,2.35vw,1.1rem)] leading-5">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-gray-500">Tournament</p>
+                                <p className="max-w-[68%] truncate text-right text-gray-200">{tournamentName}</p>
                               </div>
-                              <div>
-                                <p className="text-gray-500">Chain</p>
-                                <p className="truncate text-gray-200">{item.chain || '—'}</p>
-                              </div>
-                              <div>
-                                <p className="text-gray-500">Recipient</p>
-                                <p className="truncate text-gray-200">{item.recipient_email || '—'}</p>
-                              </div>
-                              <div>
-                                <p className="text-gray-500">Created</p>
-                                <p className="text-gray-200">{formatPayoutDate(item.created_at)}</p>
-                              </div>
-                              <div>
-                                <p className="text-gray-500">Paid</p>
-                                <p className="text-gray-200">{formatPayoutDate(item.paid_at)}</p>
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-gray-500">Date issued</p>
+                                <p className="max-w-[68%] truncate text-right text-gray-200">{issuedDate}</p>
                               </div>
                             </div>
                             {item.tx_hash ? (
-                              <div className="space-y-1 text-xs">
-                                <p className="text-gray-500">Transaction</p>
-                                <p className="break-all text-gray-300">{truncateHash(item.tx_hash)}</p>
+                              <div className="flex items-center gap-2 text-[clamp(0.95rem,2.35vw,1.1rem)] leading-5">
+                                <p className="shrink-0 text-gray-500">Tx</p>
+                                <p className="font-num min-w-0 flex-1 truncate text-gray-300">
+                                  {truncateHash(item.tx_hash)}
+                                </p>
                                 {payoutExplorerUrl ? (
                                   <a
                                     href={payoutExplorerUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="inline-block text-gray-200 hover:underline"
+                                    className="shrink-0 font-medium text-gray-200 hover:underline"
                                   >
-                                    View in explorer
+                                    View
                                   </a>
                                 ) : null}
                               </div>
                             ) : null}
                             {item.failure_reason ? (
-                              <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2">
-                                <p className="text-xs text-red-300">{item.failure_reason}</p>
+                              <div className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1">
+                                <p className="claimable-failure-compact text-[clamp(0.88rem,2.1vw,1rem)] leading-5 text-red-300">
+                                  {item.failure_reason}
+                                </p>
                               </div>
                             ) : null}
                           </div>

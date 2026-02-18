@@ -23,11 +23,9 @@ export function formatUsdc(minorUnits?: number | null): string {
 export function timeRemainingLabel(expiresAtMs?: number | null, nowMs = Date.now()): string {
   if (!expiresAtMs) return '';
   const diff = expiresAtMs - nowMs;
-  if (diff <= 0) return 'Expired';
-  const seconds = Math.max(1, Math.floor(diff / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m`;
+  if (diff <= 0) return '0s';
+  const seconds = Math.max(0, Math.floor(diff / 1000));
+  return `${seconds}s`;
 }
 
 export function isQuoteExpiredError(message: string): boolean {

@@ -202,6 +202,24 @@ function readStringField(record: Record<string, unknown>, keys: string[]): strin
   return undefined;
 }
 
+function readTournamentName(record: Record<string, unknown>): string | undefined {
+  const direct = readStringField(record, [
+    'tournament_name',
+    'tournamentName',
+    'tournament_title',
+    'tournamentTitle',
+    'event_name',
+    'eventName',
+  ]);
+  if (direct) return direct;
+
+  const tournament = record.tournament;
+  if (tournament && typeof tournament === 'object') {
+    return readStringField(tournament as Record<string, unknown>, ['name', 'title']);
+  }
+  return undefined;
+}
+
 function normalizePayout(raw: unknown): PayoutPreview | null {
   if (!raw || typeof raw !== 'object') return null;
   const record = raw as Record<string, unknown>;
@@ -228,6 +246,7 @@ function normalizePayout(raw: unknown): PayoutPreview | null {
     id,
     payout_id: payoutId,
     claim_token: claimToken,
+    tournament_name: readTournamentName(record) ?? undefined,
     asset,
     chain,
     amount_formatted: amountFormatted,

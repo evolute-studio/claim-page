@@ -98,7 +98,7 @@ export function WithdrawStepAmount({
     <div className="flex flex-1 flex-col justify-between pb-6 pt-8 animate-slide-in">
       <div className="flex flex-1 flex-col items-center justify-center space-y-5 text-center">
         <p className="text-[11px] uppercase tracking-[0.2em] text-gray-500">
-          Enter amount to receive
+          {amountMode === 'pay' ? 'Enter amount to pay' : 'Enter amount to receive'}
         </p>
 
         <div className="flex h-[3.6rem] items-center justify-center">

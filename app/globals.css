@@ -101,6 +101,50 @@ body {
   }
 }
 
+@keyframes claimMetalFlow {
+  0% {
+    transform: translate3d(-50%, 0, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes claimCtaPulse {
+  0%,
+  100% {
+    border-color: rgba(92, 227, 172, 0.5);
+    background-color: rgba(16, 185, 129, 0.2);
+    color: rgba(223, 252, 237, 0.98);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      0 8px 16px rgba(0, 0, 0, 0.28),
+      0 0 0 0 rgba(16, 185, 129, 0);
+  }
+  50% {
+    border-color: rgba(110, 231, 183, 0.72);
+    background-color: rgba(16, 185, 129, 0.26);
+    color: rgba(236, 253, 245, 0.99);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.22),
+      0 10px 22px rgba(0, 0, 0, 0.34),
+      0 0 0 1px rgba(110, 231, 183, 0.24),
+      0 0 24px rgba(16, 185, 129, 0.28);
+  }
+}
+
+@keyframes withdrawQuoteDangerPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(248, 113, 113, 0);
+    filter: saturate(100%);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.34), 0 0 16px rgba(248, 113, 113, 0.32);
+    filter: saturate(132%);
+  }
+}
+
 .animate-slide-in {
   animation: slideIn 180ms ease-out;
 }
@@ -146,6 +190,91 @@ body {
   animation: historyPayoutFocusFlash 2800ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.claimable-metal-pill {
+  position: relative;
+  isolation: isolate;
+  border-color: rgba(184, 194, 209, 0.42);
+  background:
+    radial-gradient(120% 85% at 10% 0%, rgba(255, 255, 255, 0.12), transparent 52%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.04)),
+    rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+  box-shadow:
+    inset 0 10px 24px rgba(255, 255, 255, 0.05),
+    inset 0 -12px 24px rgba(0, 0, 0, 0.18),
+    0 10px 20px rgba(0, 0, 0, 0.28);
+}
+
+.claimable-metal-pill::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 200%;
+  pointer-events: none;
+  z-index: 0;
+  background-image: linear-gradient(
+    118deg,
+    rgba(209, 217, 229, 0.15) 0%,
+    rgba(194, 205, 220, 0.17) 12%,
+    rgba(166, 178, 198, 0.13) 24%,
+    rgba(132, 145, 166, 0.1) 36%,
+    rgba(219, 227, 238, 0.16) 50%,
+    rgba(138, 152, 173, 0.11) 64%,
+    rgba(182, 194, 212, 0.13) 78%,
+    rgba(201, 210, 224, 0.17) 90%,
+    rgba(209, 217, 229, 0.15) 100%
+  );
+  background-size: 50% 100%;
+  background-repeat: repeat-x;
+  animation: claimMetalFlow 5.6s linear infinite;
+  will-change: transform;
+}
+
+.claimable-metal-pill > * {
+  position: relative;
+  z-index: 1;
+}
+
+.claimable-metal-pill:hover {
+  border-color: rgba(214, 223, 236, 0.58);
+  box-shadow:
+    inset 0 12px 26px rgba(255, 255, 255, 0.07),
+    inset 0 -14px 26px rgba(0, 0, 0, 0.2),
+    0 14px 28px rgba(0, 0, 0, 0.34);
+}
+
+.claimable-cta-button {
+  border-color: rgba(92, 227, 172, 0.5);
+  background-color: rgba(16, 185, 129, 0.2);
+  color: rgba(223, 252, 237, 0.98);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 8px 16px rgba(0, 0, 0, 0.28),
+    0 0 0 0 rgba(16, 185, 129, 0);
+  animation: claimCtaPulse 2.8s ease-in-out infinite;
+}
+
+.claimable-cta-button:hover:not(:disabled) {
+  border-color: rgba(134, 239, 172, 0.74);
+  background-color: rgba(16, 185, 129, 0.3);
+}
+
+.claimable-cta-button:disabled {
+  animation: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.claimable-failure-compact {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.withdraw-quote-danger-pulse {
+  animation: withdrawQuoteDangerPulse 960ms ease-in-out infinite;
+}
+
 .history-flip-scene {
   perspective: 1100px;
 }
@@ -154,7 +283,7 @@ body {
   position: relative;
   width: 100%;
   transform-style: preserve-3d;
-  transition: transform 520ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform 680ms ease-in-out;
 }
 
 .history-flip-card.is-flipped {
@@ -166,7 +295,7 @@ body {
   inset: 0;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
-  transition: opacity 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity 320ms ease-in-out;
 }
 
 .history-flip-face--front {
@@ -189,7 +318,6 @@ body {
 .history-flip-card.is-flipped .history-flip-face--back {
   opacity: 1;
   pointer-events: auto;
-  transition-delay: 110ms;
 }
 
 .transient-scrollbar {
@@ -231,6 +359,22 @@ body {
   .animate-history-view-slide-right,
   .animate-history-refresh-spin,
   .history-payout-focus-flash {
+    animation: none;
+  }
+
+  .claimable-metal-pill {
+    animation: none;
+  }
+
+  .claimable-metal-pill::before {
+    animation: none;
+  }
+
+  .claimable-cta-button {
+    animation: none;
+  }
+
+  .withdraw-quote-danger-pulse {
     animation: none;
   }
 

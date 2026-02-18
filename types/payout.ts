@@ -12,6 +12,7 @@ export interface PayoutPreview {
   id?: string;
   claim_token?: string;
   payout_id?: string;
+  tournament_name?: string;
   asset: string;
   chain: string;
   amount_minor_units: number;

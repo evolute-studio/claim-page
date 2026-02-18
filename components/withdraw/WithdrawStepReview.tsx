@@ -22,17 +22,15 @@ type WithdrawStepReviewProps = {
   hasDestinationAddressError: boolean;
   isDestinationAddressValid: boolean;
   destinationAddressTrimmed: string;
-  lockedAmountMode: 'receive' | 'pay' | null;
   amountMode: 'receive' | 'pay';
   derivedPayMinor: number | null;
-  lockedQuote: WithdrawalQuoteResponse | null;
   derivedReceiveMinor: number | null;
   isQuoteLocked: boolean;
   quoteTimeRemaining: string;
+  quoteSecondsRemaining: number | null;
   destinationConfig?: DestinationConfig;
   destination: DestinationChain;
   NetworkIcon?: ComponentType<NetworkIconProps>;
-  quoteLoading: boolean;
   displayQuote: WithdrawalQuoteResponse | null;
   quoteError: string | null;
   displayMode: 'receive' | 'pay';
@@ -60,17 +58,15 @@ export function WithdrawStepReview({
   hasDestinationAddressError,
   isDestinationAddressValid,
   destinationAddressTrimmed,
-  lockedAmountMode,
   amountMode,
   derivedPayMinor,
-  lockedQuote,
   derivedReceiveMinor,
   isQuoteLocked,
   quoteTimeRemaining,
+  quoteSecondsRemaining,
   destinationConfig,
   destination,
   NetworkIcon,
-  quoteLoading,
   displayQuote,
   quoteError,
   displayMode,
@@ -90,7 +86,15 @@ export function WithdrawStepReview({
   confirmDisabled,
   confirmLabel,
 }: WithdrawStepReviewProps) {
-  const showQuoteSkeleton = !displayQuote || quoteLoading || !!quoteError;
+  const showQuoteSkeleton = !displayQuote || !!quoteError;
+  const isDestinationAddressEmpty = destinationAddressTrimmed.length === 0;
+  const isQuoteDanger = !isQuoteLocked && quoteSecondsRemaining !== null && quoteSecondsRemaining <= 10;
+  const youPayMinor =
+    displayMode === 'pay'
+      ? derivedPayMinor
+      : displayQuote
+        ? displayQuote.total_burn_usdc_minor
+        : derivedPayMinor;
 
   return (
     <div className="flex flex-1 flex-col justify-between pb-6 pt-4 animate-slide-in">
@@ -105,16 +109,22 @@ export function WithdrawStepReview({
               value={destinationAddress}
               onChange={(event) => onDestinationAddressChange(event.target.value)}
               placeholder="Enter address to send to"
-              className={`w-full rounded-2xl bg-white/[0.02] px-4 py-3.5 text-base text-white focus:outline-none focus:ring-2 ${
+              className={`w-full rounded-2xl px-4 py-3.5 text-base text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 ${
                 hasDestinationAddressError
-                  ? 'border border-red-500/70 focus:ring-red-500/40'
-                  : 'border border-white/10 focus:ring-white/20'
+                  ? 'border border-red-500/70 bg-white/[0.02] focus:ring-red-500/40'
+                  : isDestinationAddressEmpty
+                    ? 'border-2 border-white bg-white/[0.03] focus:ring-white/30'
+                    : 'border border-white/10 bg-white/[0.02] focus:ring-white/20'
               }`}
             />
             <button
               type="button"
               onClick={onPasteAddress}
-              className="inline-flex h-[52px] w-[52px] items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-white transition hover:bg-white/10"
+              className={`inline-flex h-[52px] w-[52px] items-center justify-center rounded-2xl text-white transition hover:bg-white/10 ${
+                isDestinationAddressEmpty
+                  ? 'border border-white/25 bg-white/[0.07] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]'
+                  : 'border border-white/10 bg-white/[0.04]'
+              }`}
               aria-label="Paste address"
             >
               <Clipboard size={18} strokeWidth={1.9} />
@@ -125,6 +135,8 @@ export function WithdrawStepReview({
               <p className="text-[12px] text-red-400">Invalid address</p>
             ) : isDestinationAddressValid ? (
               <p className="text-[12px] text-emerald-300">Address looks valid</p>
+            ) : isDestinationAddressEmpty ? (
+              <p className="text-[12px] text-gray-400">Required to continue</p>
             ) : null}
           </div>
         </div>
@@ -132,25 +144,8 @@ export function WithdrawStepReview({
         <div className="space-y-4 rounded-2xl border border-white/[0.14] bg-white/[0.03] p-5">
           <div className="text-center">
             <p className="font-num text-[3rem] font-semibold tracking-[0.02em] text-white">
-              {(lockedAmountMode ?? amountMode) === 'pay'
-                ? derivedPayMinor !== null
-                  ? formatUsdc(derivedPayMinor)
-                  : '0.00'
-                : lockedQuote
-                  ? formatUsdc(lockedQuote.transfer_amount_usdc_minor)
-                  : derivedReceiveMinor !== null
-                    ? formatUsdc(derivedReceiveMinor)
-                    : '0.00'}{' '}
+              {youPayMinor !== null ? formatUsdc(youPayMinor) : '0.00'}{' '}
               <span className="text-gray-400">USDC</span>
-            </p>
-            <p className="mt-2 inline-flex h-[36px] w-[56px] items-center justify-center rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[12px] text-gray-400">
-              {isQuoteLocked ? (
-                'Locked'
-              ) : showQuoteSkeleton ? (
-                <span className="inline-flex h-3 w-8 animate-pulse rounded-full bg-white/14" />
-              ) : (
-                quoteTimeRemaining
-              )}
             </p>
           </div>
           <div className="space-y-2.5 text-[17px] text-gray-300">
@@ -184,29 +179,39 @@ export function WithdrawStepReview({
             {showQuoteSkeleton ? (
               <>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-gray-400">You pay</span>
-                  <span className="inline-flex h-[1.05em] w-[7.5ch] animate-pulse rounded bg-white/14" />
+                  <div className="flex min-w-0 items-center gap-2 text-gray-400">
+                    <span className="leading-none">Fees</span>
+                    <span className="inline-flex h-[26px] w-[56px] shrink-0 animate-pulse rounded-full bg-white/14" />
+                  </div>
+                  <span className="inline-flex h-[1.05em] w-[7.5ch] shrink-0 animate-pulse rounded bg-white/14" />
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-gray-400">You receive</span>
-                  <span className="inline-flex h-[1.05em] w-[7.5ch] animate-pulse rounded bg-white/14" />
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-gray-400">Fees</span>
                   <span className="inline-flex h-[1.05em] w-[7.5ch] animate-pulse rounded bg-white/14" />
                 </div>
               </>
             ) : (
               <>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-gray-400">You pay</span>
-                  <span className="font-num text-white">
-                    {displayMode === 'pay'
-                      ? derivedPayMinor !== null
-                        ? formatUsdc(derivedPayMinor)
-                        : '0.00'
-                      : formatUsdc(displayQuote.total_burn_usdc_minor)}{' '}
-                    <span className="text-gray-400">USDC</span>
+                  <div className="flex min-w-0 items-center gap-2 text-gray-400">
+                    <span className="leading-none">Fees</span>
+                    <span
+                      className={`font-num inline-flex h-[26px] min-w-[56px] shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-2.5 text-[11px] transition-[color,background-color,border-color,box-shadow] duration-300 ${
+                        isQuoteDanger
+                          ? 'withdraw-quote-danger-pulse border-red-500/55 bg-red-500/16 text-red-100'
+                          : 'border-white/10 bg-white/[0.04] text-gray-400'
+                      }`}
+                    >
+                      {isQuoteLocked ? 'Locked' : quoteTimeRemaining}
+                    </span>
+                  </div>
+                  <span
+                    className={`font-num shrink-0 transition-colors duration-300 ${
+                      isQuoteDanger ? 'text-red-300 withdraw-quote-danger-pulse' : 'text-white'
+                    }`}
+                  >
+                    {formatUsdc(displayQuote.max_fee_usdc_minor)}{' '}
+                    <span className={isQuoteDanger ? 'text-red-200' : 'text-gray-400'}>USDC</span>
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
@@ -217,13 +222,6 @@ export function WithdrawStepReview({
                       : derivedReceiveMinor !== null
                         ? formatUsdc(derivedReceiveMinor)
                         : '0.00'}{' '}
-                    <span className="text-gray-400">USDC</span>
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-gray-400">Fees</span>
-                  <span className="font-num text-white">
-                    {formatUsdc(displayQuote.max_fee_usdc_minor)}{' '}
                     <span className="text-gray-400">USDC</span>
                   </span>
                 </div>
