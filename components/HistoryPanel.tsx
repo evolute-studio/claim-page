@@ -524,7 +524,7 @@ export function HistoryPanel({
                         }}
                       >
                         <div className="flex h-full flex-col">
-                          <div className="flex h-[68px] items-center justify-between gap-3 p-3">
+                          <div className="flex h-[68px] shrink-0 items-center justify-between gap-3 p-3">
                             <div className="min-w-0">
                               <p className="font-num truncate text-base font-semibold leading-5 text-white">
                                 {formatUsdc(item.amount_minor_units)} <span className="text-gray-400">USDC</span>
@@ -653,7 +653,7 @@ export function HistoryPanel({
                         }}
                       >
                         <div className="flex h-full flex-col">
-                          <div className="flex h-[68px] items-center justify-between gap-3 p-3">
+                          <div className="flex h-[68px] shrink-0 items-center justify-between gap-3 p-3">
                             <div className="min-w-0">
                               <p className="font-num truncate text-base font-semibold leading-5 text-white">
                                 {formatUsdc(item.transfer_amount_usdc_minor)}{' '}
