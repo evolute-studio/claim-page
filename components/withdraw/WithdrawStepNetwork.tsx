@@ -84,7 +84,7 @@ export function WithdrawStepNetwork({
                     ? 'Fee: loading...'
                     : 'Fee unavailable';
 
-          const isSelected = destination === option.key;
+          const isSelected = destination === option.key && feeAffordable;
           const isFeeLoading = option.key !== 'base' && feeEstimate === undefined && networkFeeLoading;
 
           return (

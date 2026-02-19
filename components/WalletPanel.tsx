@@ -1294,6 +1294,8 @@ export function WalletPanel({
     if (!focused) return null;
     return focused.id ?? focused.payout_id ?? focused.claim_token ?? `${focused.status}-${focused.expires_at}`;
   }, [claimablePayouts, focusPayoutRef, focusToken]);
+  const showClaimableSection =
+    claimablePayoutsLoading || !!claimablePayoutsError || claimablePayouts.length > 0;
 
   useEffect(() => {
     if (!focusedClaimableId || withdrawOpen) return;
@@ -1578,7 +1580,7 @@ export function WalletPanel({
         </div>
       ) : null}
 
-      {!withdrawOpen && (
+      {!withdrawOpen && showClaimableSection && (
         <div
           className={`mt-6 flex min-h-0 flex-1 flex-col transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
             isActive ? 'translate-x-0 opacity-100 brightness-100' : '-translate-x-8 opacity-35 brightness-50'
@@ -1623,8 +1625,6 @@ export function WalletPanel({
                   </div>
                 ))}
               </div>
-            ) : claimablePayouts.length === 0 ? (
-              <p className="text-sm text-gray-500">No claimable payouts.</p>
             ) : (
               <div className="space-y-3 pb-2">
                 {claimablePayouts.map((item, index) => {

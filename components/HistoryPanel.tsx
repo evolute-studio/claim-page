@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { getIdentityToken, useIdentityToken } from '@privy-io/react-auth';
-import { ChevronDown, RotateCw } from 'lucide-react';
+import { ChevronDown, Inbox, RotateCw } from 'lucide-react';
 import { getMyPayouts, getMyWithdrawals } from '@/lib/api';
 import { getCctpConfig, getDestinationChains } from '@/lib/cctp';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -44,6 +44,26 @@ function openExplorerUrl(chain: string, txHash: string) {
   if (normalized.includes('polygon')) return `https://polygonscan.com/tx/${txHash}`;
   if (normalized.includes('ethereum')) return `https://etherscan.io/tx/${txHash}`;
   return '';
+}
+
+function EmptyHistoryState({ view }: { view: HistoryView }) {
+  const title = view === 'incomes' ? 'No incomes yet' : 'No outcomes yet';
+  const description =
+    view === 'incomes'
+      ? 'Once you receive payouts, they will appear here.'
+      : 'Once you send funds, they will appear here.';
+
+  return (
+    <div className="flex h-full min-h-0 items-center justify-center px-4">
+      <div className="mx-auto flex h-[188px] w-full max-w-[300px] flex-col items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.02] px-4 py-5 text-center">
+        <span className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-white/[0.04] text-gray-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]">
+          <Inbox className="h-5 w-5" aria-hidden="true" />
+        </span>
+        <p className="font-num mt-2.5 text-[15px] font-medium tracking-[0.02em] text-white">{title}</p>
+        <p className="mt-1 min-h-[44px] text-sm leading-5 text-gray-400">{description}</p>
+      </div>
+    </div>
+  );
 }
 
 export function HistoryPanel({
@@ -448,7 +468,7 @@ export function HistoryPanel({
           >
             <div className="min-h-0 h-full w-1/2 pr-1">
               {incomes.length === 0 ? (
-                <p className="text-sm text-gray-400">No incomes found.</p>
+                <EmptyHistoryState view="incomes" />
               ) : (
                 <div
                   ref={incomesListRef}
@@ -580,7 +600,7 @@ export function HistoryPanel({
 
             <div className="min-h-0 h-full w-1/2 pl-1">
               {outcomes.length === 0 ? (
-                <p className="text-sm text-gray-400">No outcomes found.</p>
+                <EmptyHistoryState view="outcomes" />
               ) : (
                 <div
                   ref={outcomesListRef}
