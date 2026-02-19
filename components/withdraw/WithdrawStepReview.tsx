@@ -211,13 +211,13 @@ export function WithdrawStepReview({
               <>
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2 text-gray-400">
-                    <span className="leading-none">Fees</span>
+                    <span className="leading-none text-gray-200">Fees</span>
                     <span className="inline-flex h-[26px] w-[56px] shrink-0 animate-pulse rounded-full bg-white/14" />
                   </div>
                   <span className="inline-flex h-[1.05em] w-[7.5ch] shrink-0 animate-pulse rounded bg-white/14" />
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-gray-400">You receive</span>
+                  <span className="text-gray-200">You receive</span>
                   <span className="inline-flex h-[1.05em] w-[7.5ch] animate-pulse rounded bg-white/14" />
                 </div>
               </>
@@ -225,12 +225,12 @@ export function WithdrawStepReview({
               <>
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2 text-gray-400">
-                    <span className="leading-none">Fees</span>
+                    <span className="leading-none text-gray-200">Fees</span>
                     <span
                       className={`font-num inline-flex h-[26px] min-w-[56px] shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-2.5 text-[11px] transition-[color,background-color,border-color,box-shadow] duration-300 ${
                         isQuoteDanger
                           ? 'withdraw-quote-danger-text-pulse withdraw-quote-danger-pill-pulse border-red-500/80 bg-red-500/12 text-red-100'
-                          : 'border-white/10 bg-white/[0.04] text-gray-400'
+                          : 'border-white/25 bg-white/[0.1] text-gray-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
                       }`}
                     >
                       {isQuoteLocked ? 'Locked' : quoteTimeRemaining}
@@ -246,14 +246,18 @@ export function WithdrawStepReview({
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-gray-400">You receive</span>
-                  <span className="font-num text-white">
+                  <span className="text-gray-200">You receive</span>
+                  <span
+                    className={`font-num shrink-0 transition-colors duration-300 ${
+                      isQuoteDanger ? 'text-red-200 withdraw-quote-danger-text-pulse' : 'text-white'
+                    }`}
+                  >
                     {displayMode === 'receive'
                       ? formatUsdc(displayQuote.transfer_amount_usdc_minor)
                       : derivedReceiveMinor !== null
                         ? formatUsdc(derivedReceiveMinor)
                         : '0.00'}{' '}
-                    <span className="text-gray-400">USDC</span>
+                    <span className={isQuoteDanger ? 'text-red-200' : 'text-gray-400'}>USDC</span>
                   </span>
                 </div>
               </>

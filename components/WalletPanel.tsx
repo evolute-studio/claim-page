@@ -50,7 +50,6 @@ import type {
 import type { PayoutPreview } from '@/types/payout';
 
 const ZERO_BYTES32 = `0x${'0'.repeat(64)}` as `0x${string}`;
-const MAX_UINT256 = (2n ** 256n - 1n) as bigint;
 const WITHDRAW_DEBUG_ENABLED =
   (process.env.NEXT_PUBLIC_WITHDRAW_DEBUG ?? '').toLowerCase() === 'true';
 const SHOW_WITHDRAW_DEBUG_TOGGLE = false;
@@ -370,6 +369,7 @@ export function WalletPanel({
   const claimableRowRefsRef = useRef<Record<string, HTMLDivElement | null>>({});
   const lastHandledClaimableFocusSignatureRef = useRef<string | null>(null);
   const networkIconsPreloadedRef = useRef(false);
+  const submitInFlightRef = useRef(false);
 
   const pushDebug = useCallback(
     (stage: string, message: string, data?: Record<string, unknown>) => {
@@ -808,79 +808,109 @@ export function WalletPanel({
     };
   }, [withdrawOpen]);
 
-  const handleWithdraw = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const submitWithdraw = async () => {
+    if (submitInFlightRef.current || sending) return;
+    submitInFlightRef.current = true;
     setFormError(null);
-    if (WITHDRAW_DEBUG_ENABLED) {
-      pushDebug('submit', 'Submitting withdrawal', {
-        destination,
-        amount_mode: amountMode,
-        amount_input: amountInput,
-        parsed_input_minor: parsedInputAmount?.toString() ?? null,
-        quote_id: quote?.quote_id ?? null,
-        quote_expired: quoteExpired,
-        balance_minor: balanceMinor?.toString() ?? null,
-        fee_basis_minor: feeBasisMinor,
-        selected_fee_estimate_minor: selectedFeeEstimateMinor.toString(),
-        quote_request_amount_minor: quoteRequestAmount?.toString() ?? null,
-        derived_pay_minor: derivedPayMinor ?? null,
-        derived_receive_minor: derivedReceiveMinor ?? null,
-      });
-    }
-
-    if (config.errors.length) {
-      setFormError(`Missing config: ${config.errors.join(', ')}`);
-      return;
-    }
-
-    if (!activeWalletAddress) {
-      setFormError('No wallet connected');
-      return;
-    }
-
-    if (!destinationConfig) {
-      setFormError('Destination network is not configured');
-      return;
-    }
-
-    if (!isAddress(destinationAddress.trim())) {
-      setFormError('Destination address is invalid');
-      return;
-    }
-
-    if (!parsedInputAmount || parsedInputAmount <= 0n) {
-      setFormError('Enter a valid USDC amount');
-      return;
-    }
-
-    if (belowMinReceive) {
-      setFormError(
-        amountMode === 'pay'
-          ? `Minimum amount is ${formatUsdc(minPayMinor)} USDC`
-          : 'Minimum amount is 1.00 USDC'
-      );
-      return;
-    }
-
-    if (!quote || quoteExpired) {
-      setFormError('Quote expired. Please refresh.');
-      return;
-    }
-
-    if (amountMode === 'pay') {
-      const payMinor = parsedInputAmount;
-      const requiredPay = BigInt(quote.total_burn_usdc_minor);
-      if (payMinor < requiredPay) {
-        setFormError('Entered pay amount is ниже текущих комиссий. Увеличьте сумму.');
-        return;
-      }
-    }
-
-    setSending(true);
     let createdWithdrawalId: string | null = null;
     let burnTxHashLocal: string | null = null;
     let burnSubmittedToBackend = false;
     try {
+      if (WITHDRAW_DEBUG_ENABLED) {
+        pushDebug('submit', 'Submitting withdrawal', {
+          destination,
+          amount_mode: amountMode,
+          amount_input: amountInput,
+          parsed_input_minor: parsedInputAmount?.toString() ?? null,
+          quote_id: quote?.quote_id ?? null,
+          quote_expired: quoteExpired,
+          balance_minor: balanceMinor?.toString() ?? null,
+          fee_basis_minor: feeBasisMinor,
+          selected_fee_estimate_minor: selectedFeeEstimateMinor.toString(),
+          quote_request_amount_minor: quoteRequestAmount?.toString() ?? null,
+          derived_pay_minor: derivedPayMinor ?? null,
+          derived_receive_minor: derivedReceiveMinor ?? null,
+        });
+      }
+
+      if (config.errors.length) {
+        setFormError(`Missing config: ${config.errors.join(', ')}`);
+        return;
+      }
+
+      if (!activeWalletAddress) {
+        setFormError('No wallet connected');
+        return;
+      }
+
+      if (!destinationConfig) {
+        setFormError('Destination network is not configured');
+        return;
+      }
+
+      if (!isAddress(destinationAddress.trim())) {
+        setFormError('Destination address is invalid');
+        return;
+      }
+
+      if (!parsedInputAmount || parsedInputAmount <= 0n) {
+        setFormError('Enter a valid USDC amount');
+        return;
+      }
+
+      if (belowMinReceive) {
+        setFormError(
+          amountMode === 'pay'
+            ? `Minimum amount is ${formatUsdc(minPayMinor)} USDC`
+            : 'Minimum amount is 1.00 USDC'
+        );
+        return;
+      }
+
+      if (!quote || quoteExpired) {
+        setFormError('Quote expired. Please refresh.');
+        return;
+      }
+
+      if (quote.dest_chain !== destination) {
+        setFormError('Quote mismatch. Please refresh and confirm again.');
+        return;
+      }
+
+      if (quote.dest_domain_id !== destinationConfig.domainId) {
+        setFormError('Quote destination mismatch. Please refresh.');
+        return;
+      }
+
+      const expectedTotalBurnMinor = quote.transfer_amount_usdc_minor + quote.max_fee_usdc_minor;
+      if (quote.total_burn_usdc_minor !== expectedTotalBurnMinor) {
+        setFormError('Quote integrity check failed. Please refresh.');
+        return;
+      }
+
+      if (amountMode === 'pay') {
+        const payMinor = parsedInputAmount;
+        const requiredPay = BigInt(quote.total_burn_usdc_minor);
+        if (payMinor < requiredPay) {
+          setFormError('Entered pay amount is ниже текущих комиссий. Увеличьте сумму.');
+          return;
+        }
+      }
+
+      const showWalletUIs = true;
+      const destinationAddressLower = destinationAddress.trim().toLowerCase();
+      const idempotencyBase = [
+        'withdraw',
+        activeWalletAddress.toLowerCase(),
+        String(config.sourceChain.id),
+        destination,
+        destinationAddressLower,
+        quote.quote_id,
+        String(quote.total_burn_usdc_minor),
+      ].join(':');
+      const createIdempotencyKey = `${idempotencyBase}:create`;
+
+      setSending(true);
       if (destination === 'base') {
         setLockedQuote(quote);
         setLockedAmountInput(amountInput);
@@ -909,7 +939,10 @@ export function WalletPanel({
           {
             address: activeWalletAddress as `0x${string}`,
             sponsor: true,
-            uiOptions: buildTxUiOptions({ mode: 'transfer' }),
+            uiOptions: {
+              ...buildTxUiOptions({ mode: 'transfer' }),
+              showWalletUIs,
+            },
           }
         );
 
@@ -951,13 +984,13 @@ export function WalletPanel({
         if (WITHDRAW_DEBUG_ENABLED) {
           pushDebug('onchain:approve', 'Sending approve', {
             spender: config.tokenMessengerAddress,
-            amount: MAX_UINT256.toString(),
+            amount: totalBurn.toString(),
           });
         }
         const approveData = encodeFunctionData({
           abi: erc20Abi,
           functionName: 'approve',
-          args: [config.tokenMessengerAddress as `0x${string}`, MAX_UINT256],
+          args: [config.tokenMessengerAddress as `0x${string}`, totalBurn],
         });
 
         const approveTx = await sendTransaction(
@@ -970,7 +1003,10 @@ export function WalletPanel({
           {
             address: activeWalletAddress as `0x${string}`,
             sponsor: true,
-            uiOptions: buildTxUiOptions({ mode: 'approve' }),
+            uiOptions: {
+              ...buildTxUiOptions({ mode: 'approve' }),
+              showWalletUIs,
+            },
           }
         );
         if (WITHDRAW_DEBUG_ENABLED) {
@@ -1014,10 +1050,13 @@ export function WalletPanel({
         {
           address: activeWalletAddress as `0x${string}`,
           sponsor: true,
-          uiOptions: buildTxUiOptions({
-            mode: 'burn',
-            destinationLabel: destinationConfig.label,
-          }),
+          uiOptions: {
+            ...buildTxUiOptions({
+              mode: 'burn',
+              destinationLabel: destinationConfig.label,
+            }),
+            showWalletUIs,
+          },
         }
       );
 
@@ -1041,7 +1080,7 @@ export function WalletPanel({
           quote_id: quote.quote_id,
           dest_address: destinationAddress.trim(),
         },
-        crypto.randomUUID()
+        createIdempotencyKey
       );
 
       createdWithdrawalId = createResponse.withdrawal_id;
@@ -1064,7 +1103,7 @@ export function WalletPanel({
         token,
         createResponse.withdrawal_id,
         burnTx.hash,
-        crypto.randomUUID()
+        `${idempotencyBase}:burn:${burnTx.hash.toLowerCase()}`
       );
       burnSubmittedToBackend = true;
       if (WITHDRAW_DEBUG_ENABLED) {
@@ -1127,7 +1166,13 @@ export function WalletPanel({
       }
     } finally {
       setSending(false);
+      submitInFlightRef.current = false;
     }
+  };
+
+  const handleWithdraw = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void submitWithdraw();
   };
 
   const formatClaimablePillAmount = useCallback((item: PayoutPreview): string => {
@@ -1528,6 +1573,7 @@ export function WalletPanel({
               </div>
             )}
           </form>
+
         </div>
       </div>
     );
