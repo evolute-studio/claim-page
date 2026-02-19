@@ -500,6 +500,11 @@ body {
   transform: translateX(-140%) rotate(12deg);
 }
 
+.withdraw-flow button.no-hover-frame:hover:not(:disabled),
+.withdraw-flow button.no-hover-frame:active:not(:disabled) {
+  box-shadow: none;
+}
+
 .withdraw-flow button.no-shimmer:active:not(:disabled) {
   background-color: rgba(148, 163, 184, 0.25);
 }

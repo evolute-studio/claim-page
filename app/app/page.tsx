@@ -1,10 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { UserPill } from '@privy-io/react-auth/ui';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
-import { Check, Copy } from 'lucide-react';
+import { useExportWallet, useModalStatus, usePrivy, useWallets } from '@privy-io/react-auth';
+import { Check, Copy, KeyRound, Link2, LogOut, Mail, X } from 'lucide-react';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { WalletPanel } from '@/components/WalletPanel';
 import { HistoryPanel } from '@/components/HistoryPanel';
@@ -82,17 +81,70 @@ export default function AppPage() {
   const routerRef = useRef(router);
   const searchParams = useSearchParams();
   const { wallets } = useWallets();
-  const { ready, authenticated } = usePrivy();
+  const { ready, authenticated, user, logout } = usePrivy();
   const [focusToken, setFocusToken] = useState<string | null>(null);
   const [focusPayoutRef, setFocusPayoutRef] = useState<string | null>(null);
   const [focusTargetTab, setFocusTargetTab] = useState<AppTab | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>('wallet');
   const [copied, setCopied] = useState(false);
+  const [menuCopied, setMenuCopied] = useState(false);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isExportingKey, setIsExportingKey] = useState(false);
   const [isMenuPressed, setIsMenuPressed] = useState(false);
+  const { exportWallet } = useExportWallet();
+  const { isOpen: isPrivyModalOpen } = useModalStatus();
   const queryFocusToken = searchParams.get('focusToken');
   const queryFocusPayout = searchParams.get('focusPayout');
   const queryTab = searchParams.get('tab');
   const walletAddress = wallets[0]?.address ?? null;
+  const linkedAccountsPreview = useMemo(() => {
+    if (!user) return [];
+    return user.linkedAccounts.slice(0, 5).map((account, index) => {
+      const linked = account as Record<string, unknown>;
+      const rawType = String(linked.type ?? 'account');
+      const type = rawType.replace(/_oauth$/, '');
+      if (rawType === 'wallet' || rawType === 'smart_wallet') {
+        const address = typeof linked.address === 'string' ? linked.address : '';
+        return {
+          key: `${rawType}-${address || index}`,
+          label: rawType === 'wallet' ? 'Wallet' : 'Smart wallet',
+          value: address ? truncateAddress(address) : 'Connected',
+        };
+      }
+      if (rawType === 'email') {
+        return {
+          key: `${rawType}-${String(linked.address ?? index)}`,
+          label: 'Email',
+          value: typeof linked.address === 'string' ? linked.address : 'Connected',
+        };
+      }
+      if (rawType === 'phone') {
+        return {
+          key: `${rawType}-${String(linked.number ?? index)}`,
+          label: 'Phone',
+          value: typeof linked.number === 'string' ? linked.number : 'Connected',
+        };
+      }
+      const displayValue =
+        (typeof linked.username === 'string' && linked.username) ||
+        (typeof linked.email === 'string' && linked.email) ||
+        (typeof linked.name === 'string' && linked.name) ||
+        (typeof linked.telegramUserId === 'string' && linked.telegramUserId) ||
+        'Connected';
+      return {
+        key: `${rawType}-${index}`,
+        label: type.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
+        value: displayValue,
+      };
+    });
+  }, [user]);
+  const embeddedWalletAddress = useMemo(() => {
+    const embedded = wallets.find(
+      (wallet) => wallet.walletClientType === 'privy' || wallet.walletClientType === 'privy-v2'
+    );
+    return embedded?.address ?? null;
+  }, [wallets]);
 
   useEffect(() => {
     routerRef.current = router;
@@ -123,6 +175,25 @@ export default function AppPage() {
     }
   }, [queryTab]);
 
+  useEffect(() => {
+    if (!isAccountMenuOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsAccountMenuOpen(false);
+        setMenuCopied(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isAccountMenuOpen]);
+
+  useEffect(() => {
+    if (isPrivyModalOpen) return;
+    setIsExportingKey(false);
+  }, [isPrivyModalOpen]);
+
   const handleTabChange = (tab: AppTab) => {
     setActiveTab(tab);
     router.replace(`/app?tab=${tab}`);
@@ -139,31 +210,84 @@ export default function AppPage() {
     [router]
   );
 
-  const handleCopyWalletAddress = async () => {
-    if (!walletAddress) return;
+  const copyText = useCallback(async (value: string): Promise<boolean> => {
     try {
       if (navigator.clipboard?.writeText && window.isSecureContext) {
-        await navigator.clipboard.writeText(walletAddress);
-      } else {
-        const textarea = document.createElement('textarea');
-        textarea.value = walletAddress;
-        textarea.setAttribute('readonly', '');
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        const ok = document.execCommand('copy');
-        document.body.removeChild(textarea);
-        if (!ok) {
-          throw new Error('copy failed');
-        }
+        await navigator.clipboard.writeText(value);
+        return true;
       }
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      if (!ok) {
+        throw new Error('copy failed');
+      }
+      return true;
     } catch {
-      setCopied(false);
+      return false;
     }
-  };
+  }, []);
+
+  const handleCopyWalletAddress = useCallback(async () => {
+    if (!walletAddress) return;
+    const ok = await copyText(walletAddress);
+    setCopied(ok);
+    if (ok) {
+      window.setTimeout(() => setCopied(false), 1800);
+    }
+  }, [copyText, walletAddress]);
+
+  const handleCopyWalletAddressFromMenu = useCallback(async () => {
+    if (!walletAddress) return;
+    const ok = await copyText(walletAddress);
+    setMenuCopied(ok);
+    if (ok) {
+      window.setTimeout(() => setMenuCopied(false), 1800);
+    }
+  }, [copyText, walletAddress]);
+
+  const closeAccountMenu = useCallback(() => {
+    setIsAccountMenuOpen(false);
+    setMenuCopied(false);
+    setIsExportingKey(false);
+  }, []);
+
+  const toggleAccountMenu = useCallback(() => {
+    setIsAccountMenuOpen((current) => {
+      const next = !current;
+      if (!next) {
+        setMenuCopied(false);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      closeAccountMenu();
+    } finally {
+      setIsLoggingOut(false);
+    }
+  }, [closeAccountMenu, isLoggingOut, logout]);
+
+  const handleExportPrivateKey = useCallback(async () => {
+    if (!embeddedWalletAddress || isExportingKey) return;
+    setIsExportingKey(true);
+    try {
+      await exportWallet({ address: embeddedWalletAddress });
+    } finally {
+      setIsExportingKey(false);
+    }
+  }, [embeddedWalletAddress, exportWallet, isExportingKey]);
 
   if (!ready) {
     return (
@@ -235,12 +359,16 @@ export default function AppPage() {
             </button>
 
             <div className="relative flex items-center gap-2">
-              <div
+              <button
+                type="button"
                 className="group relative h-10 w-10"
+                onClick={toggleAccountMenu}
                 onPointerDownCapture={() => setIsMenuPressed(true)}
                 onPointerUpCapture={() => setIsMenuPressed(false)}
                 onPointerCancelCapture={() => setIsMenuPressed(false)}
                 onPointerLeave={() => setIsMenuPressed(false)}
+                aria-label={isAccountMenuOpen ? 'Close account menu' : 'Open account menu'}
+                aria-expanded={isAccountMenuOpen}
               >
                 <span
                   aria-hidden="true"
@@ -250,31 +378,117 @@ export default function AppPage() {
                 >
                   <MenuIcon />
                 </span>
-                <div className="absolute inset-0 [&>button]:!h-10 [&>button]:!w-10 [&>button]:!rounded-full [&>button]:opacity-0">
-                  <UserPill
-                    expanded={false}
-                    size={40}
-                    ui={{ background: 'secondary' }}
-                    label={
-                      <span
-                        style={{
-                          position: 'absolute',
-                          width: 1,
-                          height: 1,
-                          padding: 0,
-                          margin: -1,
-                          overflow: 'hidden',
-                          clip: 'rect(0, 0, 0, 0)',
-                          whiteSpace: 'nowrap',
-                          border: 0,
-                        }}
-                      >
-                        Open menu
-                      </span>
-                    }
+              </button>
+
+              {isAccountMenuOpen && (
+                <>
+                  <button
+                    type="button"
+                    className="fixed inset-0 z-40 cursor-default bg-black/35 backdrop-blur-[1px]"
+                    aria-label="Close account menu"
+                    onClick={closeAccountMenu}
                   />
-                </div>
-              </div>
+                  <section className="animate-sheet-in absolute right-0 top-[calc(100%+0.6rem)] z-50 w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-white/12 bg-[#0c0d10] p-4 shadow-[0_22px_70px_rgba(0,0,0,0.62)]">
+                    <div className="flex items-center justify-between">
+                      <h2 className="font-num text-[1.6rem] font-semibold leading-none tracking-[0.01em] text-white">
+                        Account
+                      </h2>
+                      <button
+                        type="button"
+                        onClick={closeAccountMenu}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-200 transition hover:bg-white/10"
+                        aria-label="Close account menu"
+                      >
+                        <X size={16} strokeWidth={2.1} />
+                      </button>
+                    </div>
+
+                    <div className="mt-4 space-y-2.5">
+                      <div className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-gray-100">
+                        <Mail size={15} className="text-gray-300" />
+                        <span className="truncate">{user?.email?.address ?? 'No email linked'}</span>
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <span className="inline-flex items-center gap-2 text-sm text-white">
+                            <Link2 size={15} className="text-gray-300" />
+                            Linked accounts
+                          </span>
+                          <span className="font-num inline-flex h-6 min-w-[1.8rem] items-center justify-center rounded-full border border-white/15 bg-white/10 px-2 text-[11px] text-gray-200">
+                            {user?.linkedAccounts.length ?? 0}
+                          </span>
+                        </div>
+                        {linkedAccountsPreview.length > 0 ? (
+                          <div className="space-y-1.5">
+                            {linkedAccountsPreview.map((item) => (
+                              <div
+                                key={item.key}
+                                className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.02] px-2.5 py-1.5 text-[12px]"
+                              >
+                                <span className="text-gray-400">{item.label}</span>
+                                <span className="font-num truncate text-right text-gray-200">{item.value}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-gray-500">No linked accounts yet.</p>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => void handleLogout()}
+                        disabled={isLoggingOut}
+                        className="inline-flex w-full items-center gap-2.5 rounded-xl border border-white/12 bg-white/[0.03] px-3 py-2.5 text-sm text-white transition hover:bg-white/[0.08] disabled:opacity-60"
+                      >
+                        <LogOut size={15} className="text-gray-300" />
+                        <span>{isLoggingOut ? 'Logging out...' : 'Log out'}</span>
+                      </button>
+                    </div>
+
+                    <div className="mt-4">
+                      <p className="text-sm text-gray-400">Your wallet</p>
+                      <div className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-white/12 bg-white/[0.03] p-3">
+                        <div className="min-w-0">
+                          <p className="font-num truncate text-[1.02rem] font-semibold text-white">
+                            {walletAddress ? truncateAddress(walletAddress) : 'Not connected'}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {wallets[0]?.walletClientType === 'privy' ||
+                            wallets[0]?.walletClientType === 'privy-v2'
+                              ? 'Embedded wallet'
+                              : 'External wallet'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void handleCopyWalletAddressFromMenu()}
+                          disabled={!walletAddress}
+                          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-[#5ab7ff]/70 bg-[#12253b] px-3 text-[0.95rem] font-medium text-[#7cc9ff] transition hover:bg-[#18314c] disabled:opacity-60"
+                        >
+                          {menuCopied ? 'Copied' : 'Copy'}
+                          <Copy size={14} strokeWidth={1.9} />
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleExportPrivateKey()}
+                        disabled={!embeddedWalletAddress || isExportingKey}
+                        className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/[0.04] px-3 text-[0.95rem] font-medium text-white transition hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50"
+                        title={
+                          embeddedWalletAddress
+                            ? 'Export embedded wallet private key'
+                            : 'Private key export is available only for embedded wallets'
+                        }
+                      >
+                        <KeyRound size={14} strokeWidth={2} />
+                        <span>{isExportingKey ? 'Opening export...' : 'Export private key'}</span>
+                      </button>
+                    </div>
+                  </section>
+                </>
+              )}
             </div>
           </div>
         </header>

@@ -133,7 +133,7 @@ export function WithdrawStepReview({
             <button
               type="button"
               onClick={onPasteAddress}
-              className={`inline-flex h-[52px] w-[52px] items-center justify-center rounded-2xl text-white transition hover:bg-white/10 ${
+              className={`no-brighten no-hover-frame inline-flex h-[52px] w-[52px] items-center justify-center rounded-2xl text-white transition hover:bg-white/10 ${
                 isDestinationAddressEmpty
                   ? 'border border-white/25 bg-white/[0.07] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]'
                   : 'border border-white/10 bg-white/[0.04]'
