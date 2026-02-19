@@ -5,6 +5,7 @@ import { usePrivy } from '@privy-io/react-auth';
 import { useState, useEffect, useLayoutEffect, useRef, Suspense } from 'react';
 import type { FormEvent } from 'react';
 import { getClaimPreview } from '@/lib/api';
+import { EmailLoginSheet } from '@/components/auth/EmailLoginSheet';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import type { PayoutPreview } from '@/types/payout';
 
@@ -21,7 +22,8 @@ function ClaimContent() {
   const router = useRouter();
   const token = searchParams.get('token');
 
-  const { ready, authenticated, login } = usePrivy();
+  const { ready, authenticated } = usePrivy();
+  const [loginSheetOpen, setLoginSheetOpen] = useState(false);
 
   const [preview, setPreview] = useState<PayoutPreview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -155,7 +157,7 @@ function ClaimContent() {
   };
 
   const handleLogin = () => {
-    login();
+    setLoginSheetOpen(true);
   };
 
   if (loading) {
@@ -315,12 +317,14 @@ function ClaimContent() {
             disabled={!ready}
             className="interactive-fx no-shimmer mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-transparent bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:border-white/12 disabled:bg-white/10 disabled:text-white/40"
           >
-            {ready ? 'Continue with Privy' : 'Loading...'}
+            {ready ? 'Continue with email' : 'Loading...'}
           </button>
 
           <p className="mt-3 text-xs text-gray-500">You will be redirected to your wallet.</p>
         </section>
       </div>
+
+      <EmailLoginSheet open={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
     </div>
   );
 }

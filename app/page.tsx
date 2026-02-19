@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePrivy } from '@privy-io/react-auth';
+import { EmailLoginSheet } from '@/components/auth/EmailLoginSheet';
 
 export default function Home() {
   const router = useRouter();
-  const { ready, authenticated, login } = usePrivy();
+  const { ready, authenticated } = usePrivy();
+  const [loginSheetOpen, setLoginSheetOpen] = useState(false);
 
   useEffect(() => {
     if (!ready || !authenticated) return;
@@ -47,16 +49,18 @@ export default function Home() {
 
           <button
             type="button"
-            onClick={login}
+            onClick={() => setLoginSheetOpen(true)}
             disabled={!ready}
             className="interactive-fx no-shimmer mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-transparent bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:border-white/12 disabled:bg-white/10 disabled:text-white/40"
           >
-            {ready ? 'Continue with Privy' : 'Loading...'}
+            {ready ? 'Continue with email' : 'Loading...'}
           </button>
 
           <p className="mt-3 text-xs text-gray-500">Secure sign-in powered by Privy</p>
         </section>
       </div>
+
+      <EmailLoginSheet open={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
     </main>
   );
 }
