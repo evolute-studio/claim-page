@@ -69,10 +69,12 @@ function EmptyHistoryState({ view }: { view: HistoryView }) {
 export function HistoryPanel({
   focusToken,
   focusPayoutRef,
+  focusWithdrawalRef,
   isActive = true,
 }: {
   focusToken?: string | null;
   focusPayoutRef?: string | null;
+  focusWithdrawalRef?: string | null;
   isActive?: boolean;
 }) {
   const { identityToken } = useIdentityToken();
@@ -88,11 +90,13 @@ export function HistoryPanel({
   const [expandedIncomeId, setExpandedIncomeId] = useState<string | null>(null);
   const [expandedOutcomeId, setExpandedOutcomeId] = useState<string | null>(null);
   const [highlightedIncomeId, setHighlightedIncomeId] = useState<string | null>(null);
+  const [highlightedOutcomeId, setHighlightedOutcomeId] = useState<string | null>(null);
   const [incomesScrolling, setIncomesScrolling] = useState(false);
   const [outcomesScrolling, setOutcomesScrolling] = useState(false);
   const incomesScrollTimeoutRef = useRef<number | null>(null);
   const outcomesScrollTimeoutRef = useRef<number | null>(null);
   const highlightIncomeTimeoutRef = useRef<number | null>(null);
+  const highlightOutcomeTimeoutRef = useRef<number | null>(null);
   const incomesScrollArmedRef = useRef(false);
   const outcomesScrollArmedRef = useRef(false);
   const identityTokenRef = useRef<string | null>(identityToken ?? null);
@@ -100,8 +104,10 @@ export function HistoryPanel({
   const incomesListRef = useRef<HTMLDivElement | null>(null);
   const outcomesListRef = useRef<HTMLDivElement | null>(null);
   const incomeRowRefsRef = useRef<Record<string, HTMLDivElement | null>>({});
+  const outcomeRowRefsRef = useRef<Record<string, HTMLDivElement | null>>({});
   const pendingScrollRestoreRef = useRef<{ incomes: number; outcomes: number } | null>(null);
-  const lastHandledFocusSignatureRef = useRef<string | null>(null);
+  const lastHandledIncomeFocusSignatureRef = useRef<string | null>(null);
+  const lastHandledOutcomeFocusSignatureRef = useRef<string | null>(null);
   const lastFocusRefreshSignatureRef = useRef<string | null>(null);
   const refreshSpinHasFullTurnRef = useRef(false);
   const refreshSpinStopRequestedRef = useRef(false);
@@ -166,13 +172,13 @@ export function HistoryPanel({
   }, [loadHistory]);
 
   useEffect(() => {
-    if (!focusToken && !focusPayoutRef) return;
+    if (!focusToken && !focusPayoutRef && !focusWithdrawalRef) return;
     if (loading) return;
-    const signature = `${focusToken ?? ''}|${focusPayoutRef ?? ''}`;
+    const signature = `${focusToken ?? ''}|${focusPayoutRef ?? ''}|${focusWithdrawalRef ?? ''}`;
     if (lastFocusRefreshSignatureRef.current === signature) return;
     lastFocusRefreshSignatureRef.current = signature;
     void loadHistory('background');
-  }, [focusPayoutRef, focusToken, loadHistory, loading]);
+  }, [focusPayoutRef, focusToken, focusWithdrawalRef, loadHistory, loading]);
 
   useEffect(() => {
     if (loading) return;
@@ -220,12 +226,17 @@ export function HistoryPanel({
     if (!focused) return null;
     return focused.id ?? focused.payout_id ?? focused.claim_token ?? `${focused.status}-${focused.expires_at}`;
   }, [focusPayoutRef, focusToken, incomes]);
+  const focusedOutcomeId = useMemo(() => {
+    if (!focusWithdrawalRef) return null;
+    const focused = outcomes.find((item) => item.id === focusWithdrawalRef);
+    return focused?.id ?? null;
+  }, [focusWithdrawalRef, outcomes]);
 
   useEffect(() => {
     if (!focusedIncomeId) return;
     const focusSignature = `${focusToken ?? ''}|${focusPayoutRef ?? ''}|${focusedIncomeId}`;
-    if (lastHandledFocusSignatureRef.current === focusSignature) return;
-    lastHandledFocusSignatureRef.current = focusSignature;
+    if (lastHandledIncomeFocusSignatureRef.current === focusSignature) return;
+    lastHandledIncomeFocusSignatureRef.current = focusSignature;
 
     setView('incomes');
     setExpandedIncomeId(null);
@@ -249,6 +260,35 @@ export function HistoryPanel({
       window.clearTimeout(timerId);
     };
   }, [focusPayoutRef, focusToken, focusedIncomeId]);
+
+  useEffect(() => {
+    if (!focusedOutcomeId) return;
+    const focusSignature = `${focusWithdrawalRef ?? ''}|${focusedOutcomeId}`;
+    if (lastHandledOutcomeFocusSignatureRef.current === focusSignature) return;
+    lastHandledOutcomeFocusSignatureRef.current = focusSignature;
+
+    setView('outcomes');
+    setExpandedIncomeId(null);
+    setExpandedOutcomeId(null);
+
+    const timerId = window.setTimeout(() => {
+      const row = outcomeRowRefsRef.current[focusedOutcomeId];
+      if (row) {
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+      setHighlightedOutcomeId(focusedOutcomeId);
+      if (highlightOutcomeTimeoutRef.current) {
+        window.clearTimeout(highlightOutcomeTimeoutRef.current);
+      }
+      highlightOutcomeTimeoutRef.current = window.setTimeout(() => {
+        setHighlightedOutcomeId((current) => (current === focusedOutcomeId ? null : current));
+      }, PAYOUT_HIGHLIGHT_DURATION_MS);
+    }, PAYOUT_HIGHLIGHT_SCROLL_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [focusWithdrawalRef, focusedOutcomeId]);
 
   const baseExplorer =
     config.sourceChain.id === 84532 ? 'https://sepolia.basescan.org/tx/' : 'https://basescan.org/tx/';
@@ -325,6 +365,9 @@ export function HistoryPanel({
       }
       if (highlightIncomeTimeoutRef.current) {
         window.clearTimeout(highlightIncomeTimeoutRef.current);
+      }
+      if (highlightOutcomeTimeoutRef.current) {
+        window.clearTimeout(highlightOutcomeTimeoutRef.current);
       }
       incomesScrollArmedRef.current = false;
       outcomesScrollArmedRef.current = false;
@@ -493,18 +536,6 @@ export function HistoryPanel({
                         ? item.tournament_name.trim()
                         : 'Tournament';
                     const incomeExplorerUrl = item.tx_hash ? openExplorerUrl(item.chain, item.tx_hash) : '';
-                    const incomeFailureLines = Math.max(
-                      1,
-                      Math.ceil((item.failure_reason?.length ?? 0) / 42)
-                    );
-                    const incomeFailureHeight = item.failure_reason
-                      ? 34 + Math.max(0, incomeFailureLines - 1) * 16
-                      : 0;
-                    const incomeTxHeight = item.tx_hash ? 74 : 0;
-                    const incomeBlocks = 1 + (item.tx_hash ? 1 : 0) + (item.failure_reason ? 1 : 0);
-                    const incomeGapsHeight = Math.max(0, incomeBlocks - 1) * 12;
-                    const incomeDetailsHeight = 65 + incomeGapsHeight + incomeTxHeight + incomeFailureHeight;
-                    const incomeRowHeight = isExpanded ? 68 + incomeDetailsHeight : 68;
                     const incomeDate = formatDate(item.paid_at ?? item.created_at);
 
                     return (
@@ -513,19 +544,18 @@ export function HistoryPanel({
                         ref={(node) => {
                           incomeRowRefsRef.current[itemId] = node;
                         }}
-                        className={`transform-gpu overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.015] transition-[transform,opacity,filter,border-color,height] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-white/[0.14] hover:bg-white/[0.04] ${
+                        className={`w-full transform-gpu overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.015] transition-[transform,opacity,filter,border-color] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-white/[0.14] hover:bg-white/[0.04] ${
                           view === 'incomes'
                             ? 'translate-x-0 opacity-100 brightness-100'
                             : '-translate-x-8 opacity-35 brightness-50'
                         } ${isHighlighted ? 'history-payout-focus-flash' : ''}`}
                         style={{
                           transitionDelay: `${getVisibleStaggerDelay(index, 'incomes')}ms`,
-                          height: `${incomeRowHeight}px`,
                         }}
                       >
-                        <div className="flex h-full flex-col">
+                        <div className="flex flex-col">
                           <div className="flex h-[68px] shrink-0 items-center justify-between gap-3 p-3">
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                               <p className="font-num truncate text-base font-semibold leading-5 text-white">
                                 {formatUsdc(item.amount_minor_units)} <span className="text-gray-400">USDC</span>
                               </p>
@@ -551,44 +581,53 @@ export function HistoryPanel({
                             </div>
                           </div>
                           <div
-                            className={`min-h-0 space-y-3 overflow-hidden border-t border-white/[0.08] px-3 py-3 text-xs transition-[opacity,transform] duration-300 ${
-                              isExpanded
-                                ? 'translate-y-0 opacity-100'
-                                : 'pointer-events-none -translate-y-1 opacity-0'
+                            className={`grid transition-[grid-template-rows] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
+                              isExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
                             }`}
-                            aria-hidden={!isExpanded}
                           >
-                            <div className="space-y-2">
-                              <div className="flex items-start justify-between gap-3">
-                                <p className="text-gray-500">Tournament</p>
-                                <p className="truncate text-right text-gray-200">{tournamentName}</p>
-                              </div>
-                              <div className="flex items-start justify-between gap-3">
-                                <p className="text-gray-500">Date</p>
-                                <p className="text-right text-gray-200">{incomeDate}</p>
-                              </div>
-                            </div>
-                            {item.tx_hash ? (
-                              <div className="space-y-1">
-                                <p className="text-gray-500">Tx</p>
-                                <p className="break-all text-gray-300">{truncateHash(item.tx_hash)}</p>
-                                {incomeExplorerUrl ? (
-                                  <a
-                                    href={incomeExplorerUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-block text-gray-200 hover:underline"
-                                  >
-                                    View
-                                  </a>
+                            <div className="min-h-0 overflow-hidden">
+                              <div
+                                className={`space-y-3 border-t border-white/[0.08] px-3 py-3 text-xs transition-[opacity,transform] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
+                                  isExpanded
+                                    ? 'translate-y-0 opacity-100'
+                                    : 'pointer-events-none -translate-y-1 opacity-0'
+                                }`}
+                                aria-hidden={!isExpanded}
+                              >
+                                <div className="space-y-2">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <p className="text-gray-500">Tournament</p>
+                                    <p className="truncate text-right text-gray-200">{tournamentName}</p>
+                                  </div>
+                                  <div className="flex items-start justify-between gap-3">
+                                    <p className="text-gray-500">Date</p>
+                                    <p className="text-right text-gray-200">{incomeDate}</p>
+                                  </div>
+                                </div>
+                                {item.tx_hash ? (
+                                  <div className="space-y-1">
+                                    <p className="text-gray-500">Tx</p>
+                                    {incomeExplorerUrl ? (
+                                      <a
+                                        href={incomeExplorerUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="break-all text-gray-300 hover:text-white hover:underline"
+                                      >
+                                        {truncateHash(item.tx_hash)}
+                                      </a>
+                                    ) : (
+                                      <p className="break-all text-gray-300">{truncateHash(item.tx_hash)}</p>
+                                    )}
+                                  </div>
+                                ) : null}
+                                {item.failure_reason ? (
+                                  <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2">
+                                    <p className="text-xs text-red-300">{item.failure_reason}</p>
+                                  </div>
                                 ) : null}
                               </div>
-                            ) : null}
-                            {item.failure_reason ? (
-                              <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2">
-                                <p className="text-xs text-red-300">{item.failure_reason}</p>
-                              </div>
-                            ) : null}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -623,38 +662,25 @@ export function HistoryPanel({
                     const destinationValue = item.dest_address
                       ? `${destinationLabel} • ${truncateAddress(item.dest_address)}`
                       : destinationLabel;
-                    const outcomeFailureLines = Math.max(
-                      1,
-                      Math.ceil((item.failure_reason?.length ?? 0) / 42)
-                    );
-                    const outcomeFailureHeight = item.failure_reason
-                      ? 34 + Math.max(0, outcomeFailureLines - 1) * 16
-                      : 0;
-                    const outcomeBurnHeight = item.burn_tx_hash ? 74 : 0;
-                    const outcomeMintHeight = item.forward_tx_hash ? 74 : 0;
-                    const outcomeBlocks =
-                      1 + (item.burn_tx_hash ? 1 : 0) + (item.forward_tx_hash ? 1 : 0) + (item.failure_reason ? 1 : 0);
-                    const outcomeGapsHeight = Math.max(0, outcomeBlocks - 1) * 12;
-                    const outcomeDetailsHeight =
-                      57 + outcomeGapsHeight + outcomeBurnHeight + outcomeMintHeight + outcomeFailureHeight;
-                    const outcomeRowHeight = isExpanded ? 68 + outcomeDetailsHeight : 68;
 
                     return (
                       <div
                         key={item.id}
-                        className={`transform-gpu overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.015] transition-[transform,opacity,filter,border-color,height] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-white/[0.14] hover:bg-white/[0.04] ${
+                        ref={(node) => {
+                          outcomeRowRefsRef.current[item.id] = node;
+                        }}
+                        className={`w-full transform-gpu overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.015] transition-[transform,opacity,filter,border-color] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-white/[0.14] hover:bg-white/[0.04] ${
                           view === 'outcomes'
                             ? 'translate-x-0 opacity-100 brightness-100'
                             : 'translate-x-8 opacity-35 brightness-50'
-                        }`}
+                        } ${highlightedOutcomeId === item.id ? 'history-payout-focus-flash' : ''}`}
                         style={{
                           transitionDelay: `${getVisibleStaggerDelay(index, 'outcomes')}ms`,
-                          height: `${outcomeRowHeight}px`,
                         }}
                       >
-                        <div className="flex h-full flex-col">
+                        <div className="flex flex-col">
                           <div className="flex h-[68px] shrink-0 items-center justify-between gap-3 p-3">
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                               <p className="font-num truncate text-base font-semibold leading-5 text-white">
                                 {formatUsdc(item.transfer_amount_usdc_minor)}{' '}
                                 <span className="text-gray-400">USDC</span>
@@ -681,54 +707,62 @@ export function HistoryPanel({
                             </div>
                           </div>
                           <div
-                            className={`min-h-0 space-y-3 overflow-hidden border-t border-white/[0.08] px-3 py-3 text-xs transition-[opacity,transform] duration-300 ${
-                              isExpanded
-                                ? 'translate-y-0 opacity-100'
-                                : 'pointer-events-none -translate-y-1 opacity-0'
+                            className={`grid transition-[grid-template-rows] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
+                              isExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
                             }`}
-                            aria-hidden={!isExpanded}
                           >
-                            <div className="grid grid-cols-2 gap-2">
-                              <div className="col-span-2">
-                                <p className="text-gray-500">To</p>
-                                <p className="truncate text-gray-200">{destinationValue}</p>
-                              </div>
-                            </div>
-                            {item.burn_tx_hash ? (
-                              <div className="space-y-1">
-                                <p className="text-gray-500">Burn tx</p>
-                                <p className="break-all text-gray-300">{truncateHash(item.burn_tx_hash)}</p>
-                                <a
-                                  href={`${baseExplorer}${item.burn_tx_hash}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-block text-gray-200 hover:underline"
-                                >
-                                  View
-                                </a>
-                              </div>
-                            ) : null}
-                            {item.forward_tx_hash ? (
-                              <div className="space-y-1">
-                                <p className="text-gray-500">Mint tx</p>
-                                <p className="break-all text-gray-300">{truncateHash(item.forward_tx_hash)}</p>
-                                {destinationExplorerBase ? (
-                                  <a
-                                    href={`${destinationExplorerBase}${item.forward_tx_hash}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-block text-gray-200 hover:underline"
-                                  >
-                                    View
-                                  </a>
+                            <div className="min-h-0 overflow-hidden">
+                              <div
+                                className={`space-y-3 border-t border-white/[0.08] px-3 py-3 text-xs transition-[opacity,transform] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
+                                  isExpanded
+                                    ? 'translate-y-0 opacity-100'
+                                    : 'pointer-events-none -translate-y-1 opacity-0'
+                                }`}
+                                aria-hidden={!isExpanded}
+                              >
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="col-span-2">
+                                    <p className="text-gray-500">To</p>
+                                    <p className="truncate text-gray-200">{destinationValue}</p>
+                                  </div>
+                                </div>
+                                {item.burn_tx_hash ? (
+                                  <div className="space-y-1">
+                                    <p className="text-gray-500">Burn tx</p>
+                                    <a
+                                      href={`${baseExplorer}${item.burn_tx_hash}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="break-all text-gray-300 hover:text-white hover:underline"
+                                    >
+                                      {truncateHash(item.burn_tx_hash)}
+                                    </a>
+                                  </div>
+                                ) : null}
+                                {item.forward_tx_hash ? (
+                                  <div className="space-y-1">
+                                    <p className="text-gray-500">Mint tx</p>
+                                    {destinationExplorerBase ? (
+                                      <a
+                                        href={`${destinationExplorerBase}${item.forward_tx_hash}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="break-all text-gray-300 hover:text-white hover:underline"
+                                      >
+                                        {truncateHash(item.forward_tx_hash)}
+                                      </a>
+                                    ) : (
+                                      <p className="break-all text-gray-300">{truncateHash(item.forward_tx_hash)}</p>
+                                    )}
+                                  </div>
+                                ) : null}
+                                {item.failure_reason ? (
+                                  <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2">
+                                    <p className="text-xs text-red-300">{item.failure_reason}</p>
+                                  </div>
                                 ) : null}
                               </div>
-                            ) : null}
-                            {item.failure_reason ? (
-                              <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2">
-                                <p className="text-xs text-red-300">{item.failure_reason}</p>
-                              </div>
-                            ) : null}
+                            </div>
                           </div>
                         </div>
                       </div>

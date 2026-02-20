@@ -21,18 +21,33 @@ function parseErrorMessage(error: unknown): string {
   return 'Something went wrong. Please try again.';
 }
 
+function maskEmailPreview(value: string): string {
+  const email = value.trim();
+  const atIndex = email.indexOf('@');
+  if (atIndex <= 0 || atIndex >= email.length - 1) return email;
+
+  const local = email.slice(0, atIndex);
+  const domain = email.slice(atIndex + 1);
+  if (!domain) return email;
+  if (local.length <= 2) return `${local[0] ?? '*'}*@${domain}`;
+
+  return `${local.slice(0, 2)}…${local.slice(-1)}@${domain}`;
+}
+
 export function EmailLoginSheet({
   open,
   onClose,
   title = 'Sign in',
-  subtitle = 'Continue with email',
+  subtitle = '',
 }: EmailLoginSheetProps) {
+  const hasSubtitle = subtitle.trim().length > 0;
   const [email, setEmail] = useState('');
   const [codeDigits, setCodeDigits] = useState<string[]>(() => Array.from({ length: 6 }, () => ''));
   const [step, setStep] = useState<'email' | 'code'>('email');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const codeInputRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const autoSubmittedCodeRef = useRef<string | null>(null);
   const { sendCode, loginWithCode, state } = useLoginWithEmail();
 
   const emailTrimmed = email.trim();
@@ -42,6 +57,7 @@ export function EmailLoginSheet({
   const submittingCode = state.status === 'submitting-code';
   const canSubmitEmail = emailValid && !submittingEmail;
   const canSubmitCode = code.length === 6 && !submittingCode;
+  const codeTargetEmail = maskEmailPreview(email.trim());
 
   useEffect(() => {
     if (!open) {
@@ -124,6 +140,22 @@ export function EmailLoginSheet({
     }
   }, [code, loginWithCode]);
 
+  useEffect(() => {
+    if (!open || step !== 'code') {
+      autoSubmittedCodeRef.current = null;
+      return;
+    }
+    if (code.length < 6) {
+      autoSubmittedCodeRef.current = null;
+      return;
+    }
+    if (submittingCode) return;
+    if (autoSubmittedCodeRef.current === code) return;
+
+    autoSubmittedCodeRef.current = code;
+    void handleLoginWithCode();
+  }, [code, handleLoginWithCode, open, step, submittingCode]);
+
   const handleResend = useCallback(async () => {
     const nextEmail = email.trim();
     if (!nextEmail) return;
@@ -187,7 +219,7 @@ export function EmailLoginSheet({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[100]">
+    <div className="fixed inset-0 z-[220]">
       <button
         type="button"
         aria-label="Close sign in"
@@ -199,11 +231,11 @@ export function EmailLoginSheet({
         className="relative flex min-h-full items-end justify-center sm:items-center sm:p-4"
         style={{ paddingBottom: keyboardInset ? `${keyboardInset}px` : undefined }}
       >
-        <section className="animate-sheet-in w-full rounded-t-3xl border border-white/10 bg-[#111111] px-5 pb-[max(1.1rem,env(safe-area-inset-bottom))] pt-4 shadow-[0_-20px_70px_rgba(0,0,0,0.56)] sm:max-w-md sm:rounded-3xl sm:px-6 sm:pb-6">
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <p className="font-num text-base font-semibold tracking-[0.01em] text-white">{title}</p>
-              <p className="mt-1 text-[14px] text-gray-400">{subtitle}</p>
+        <section className="animate-sheet-in w-full rounded-t-3xl border border-white/10 bg-[#111111] px-5 pb-[max(2rem,env(safe-area-inset-bottom))] pt-4 shadow-[0_-20px_70px_rgba(0,0,0,0.56)] sm:max-w-md sm:rounded-3xl sm:px-6 sm:pb-7">
+          <div className={`mb-5 flex justify-between gap-3 ${hasSubtitle ? 'items-start' : 'items-center'}`}>
+            <div className="min-w-0 pr-2">
+              <p className="font-num text-base font-semibold leading-none tracking-[0.01em] text-white">{title}</p>
+              {subtitle ? <p className="text-[14px] text-gray-400">{subtitle}</p> : null}
             </div>
             <button
               type="button"
@@ -253,11 +285,15 @@ export function EmailLoginSheet({
               </button>
             </div>
           ) : (
-            <div className="space-y-3">
-              <p className="text-sm text-gray-300">
-                Enter the 6-digit code sent to <span className="font-num text-white">{email.trim()}</span>
-              </p>
-              <div className="flex items-center justify-between gap-2" onPaste={handleCodePaste}>
+            <div className="space-y-4">
+              <div className="rounded-xl border border-white/10 bg-white/[0.015] px-3 py-2.5">
+                <p className="text-[11px] uppercase tracking-[0.08em] text-gray-500">Verification code</p>
+                <div className="mt-1 flex w-full items-center justify-between gap-5 text-[14px]">
+                  <span className="whitespace-nowrap text-gray-300">Enter the 6-digit code sent to:</span>
+                  <span className="min-w-0 truncate text-right font-num text-white">{codeTargetEmail}</span>
+                </div>
+              </div>
+              <div className="flex items-center justify-center gap-1.5" onPaste={handleCodePaste}>
                 {Array.from({ length: 6 }, (_item, index) => (
                   <input
                     key={`code-digit-${index}`}
@@ -272,7 +308,9 @@ export function EmailLoginSheet({
                     value={codeDigits[index]}
                     onChange={(event) => handleCodeDigitChange(index, event.target.value)}
                     onKeyDown={(event) => handleCodeDigitKeyDown(index, event)}
-                    className="h-12 w-10 rounded-xl border border-white/12 bg-white/[0.02] text-center font-num text-[20px] text-white outline-none transition focus:border-white/25 focus:bg-white/[0.05]"
+                    className={`h-11 w-10 rounded-lg border bg-[#0d0d0d] text-center font-num text-[20px] outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition ${
+                      codeDigits[index] ? 'border-white/35 text-white' : 'border-white/14 text-white/95'
+                    } focus:border-white/55 focus:bg-white/[0.08] focus:shadow-[0_0_0_3px_rgba(255,255,255,0.08)]`}
                     aria-label={`Code digit ${index + 1}`}
                   />
                 ))}
@@ -285,7 +323,7 @@ export function EmailLoginSheet({
               >
                 {submittingCode ? 'Verifying...' : 'Sign in'}
               </button>
-              <div className="flex items-center justify-between gap-3 text-xs">
+              <div className="mt-1 flex items-center justify-between gap-3 border-t border-white/10 pt-3 text-xs">
                 <button
                   type="button"
                   onClick={() => {

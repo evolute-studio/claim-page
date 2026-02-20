@@ -7,6 +7,17 @@ import { ArrowLeft, Check, Copy, KeyRound, LogOut, Mail } from 'lucide-react';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { truncateAddress } from '@/lib/format';
 
+function GoogleMark() {
+  return (
+    <svg aria-hidden="true" className="h-4 w-4 shrink-0" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+      <path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z" />
+      <path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z" />
+      <path fill="#FBBC05" d="M11.69 28.18C11.25 26.86 11 25.45 11 24s.25-2.86.69-4.18v-5.7H4.34A21.99 21.99 0 0 0 2 24c0 3.55.85 6.91 2.34 9.88l7.35-5.7z" />
+      <path fill="#EA4335" d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z" />
+    </svg>
+  );
+}
+
 export default function AccountPage() {
   const router = useRouter();
   const { wallets } = useWallets();
@@ -17,21 +28,37 @@ export default function AccountPage() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isExportingKey, setIsExportingKey] = useState(false);
 
-  const walletAddress = wallets[0]?.address ?? null;
-  const emailAddress = useMemo(() => {
-    if (user?.email?.address) return user.email.address;
-    const linkedEmail = user?.linkedAccounts.find((account) => {
-      const raw = account as Record<string, unknown>;
-      return raw.type === 'email' && typeof raw.address === 'string';
-    }) as { address?: string } | undefined;
-    return linkedEmail?.address ?? 'No email linked';
-  }, [user?.email?.address, user?.linkedAccounts]);
   const embeddedWalletAddress = useMemo(() => {
     const embedded = wallets.find(
       (wallet) => wallet.walletClientType === 'privy' || wallet.walletClientType === 'privy-v2'
     );
     return embedded?.address ?? null;
   }, [wallets]);
+  const walletAddress = embeddedWalletAddress ?? wallets[0]?.address ?? null;
+  const emailAddress = useMemo(() => {
+    if (user?.email?.address) return user.email.address;
+    const linkedEmail = user?.linkedAccounts.find((account) => {
+      const raw = account as Record<string, unknown>;
+      if (raw.type === 'email' && typeof raw.address === 'string') return true;
+      if (raw.type === 'google_oauth' && typeof raw.email === 'string') return true;
+      return false;
+    }) as { address?: string; email?: string } | undefined;
+    return linkedEmail?.address ?? linkedEmail?.email ?? 'No email linked';
+  }, [user?.email?.address, user?.linkedAccounts]);
+  const authProvider = useMemo(() => {
+    const linkedAccounts = user?.linkedAccounts ?? [];
+    const hasGoogle = linkedAccounts.some((account) => {
+      const raw = account as Record<string, unknown>;
+      return raw.type === 'google_oauth';
+    });
+    if (hasGoogle) return 'Google';
+    const hasEmail = linkedAccounts.some((account) => {
+      const raw = account as Record<string, unknown>;
+      return raw.type === 'email';
+    });
+    if (hasEmail) return 'Email';
+    return 'Other';
+  }, [user?.linkedAccounts]);
 
   useEffect(() => {
     if (!ready) return;
@@ -142,6 +169,13 @@ export default function AccountPage() {
             <div className="mt-3 space-y-2">
               <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2.5">
                 <span className="inline-flex items-center gap-2 text-sm text-gray-300">
+                  {authProvider === 'Google' ? <GoogleMark /> : <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/20 text-[10px] font-semibold text-white">A</span>}
+                  Sign-in method
+                </span>
+                <span className="font-num text-right text-sm text-white">{authProvider}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2.5">
+                <span className="inline-flex items-center gap-2 text-sm text-gray-300">
                   <Mail size={15} />
                   Email
                 </span>
@@ -155,7 +189,7 @@ export default function AccountPage() {
                     {walletAddress ? truncateAddress(walletAddress) : 'Not connected'}
                   </p>
                   <p className="text-[13px] text-gray-500">
-                    {wallets[0]?.walletClientType === 'privy' || wallets[0]?.walletClientType === 'privy-v2'
+                    {embeddedWalletAddress
                       ? 'Embedded wallet'
                       : 'External wallet'}
                   </p>

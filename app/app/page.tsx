@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { useCreateWallet, usePrivy, useWallets } from '@privy-io/react-auth';
 import { Check, Copy } from 'lucide-react';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { WalletPanel } from '@/components/WalletPanel';
@@ -79,16 +79,21 @@ function HistoryIcon({ active }: { active: boolean }) {
 export default function AppPage() {
   const router = useRouter();
   const routerRef = useRef(router);
+  const walletCreateAttemptedRef = useRef(false);
   const searchParams = useSearchParams();
-  const { wallets } = useWallets();
+  const { wallets, ready: walletsReady } = useWallets();
+  const { createWallet } = useCreateWallet();
   const { ready, authenticated } = usePrivy();
   const [focusToken, setFocusToken] = useState<string | null>(null);
   const [focusPayoutRef, setFocusPayoutRef] = useState<string | null>(null);
+  const [focusWithdrawalRef, setFocusWithdrawalRef] = useState<string | null>(null);
   const [focusTargetTab, setFocusTargetTab] = useState<AppTab | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>('wallet');
   const [copied, setCopied] = useState(false);
+  const [isCreatingEmbeddedWallet, setIsCreatingEmbeddedWallet] = useState(false);
   const queryFocusToken = searchParams.get('focusToken');
   const queryFocusPayout = searchParams.get('focusPayout');
+  const queryFocusWithdrawal = searchParams.get('focusWithdrawal');
   const queryTab = searchParams.get('tab');
   const walletAddress = wallets[0]?.address ?? null;
 
@@ -99,16 +104,36 @@ export default function AppPage() {
   useEffect(() => {
     if (!ready) return;
     if (!authenticated) {
+      walletCreateAttemptedRef.current = false;
       router.replace('/');
     }
   }, [ready, authenticated, router]);
 
   useEffect(() => {
-    if (!queryFocusToken && !queryFocusPayout) return;
+    if (!ready || !authenticated || !walletsReady) return;
+    const hasEmbeddedWallet = wallets.some(
+      (wallet) => wallet.walletClientType === 'privy' || wallet.walletClientType === 'privy-v2'
+    );
+    if (hasEmbeddedWallet || walletCreateAttemptedRef.current) return;
+
+    walletCreateAttemptedRef.current = true;
+    setIsCreatingEmbeddedWallet(true);
+    void createWallet()
+      .catch((error: unknown) => {
+        console.error('Failed to create embedded wallet after login', error);
+      })
+      .finally(() => {
+        setIsCreatingEmbeddedWallet(false);
+      });
+  }, [authenticated, createWallet, ready, wallets, walletsReady]);
+
+  useEffect(() => {
+    if (!queryFocusToken && !queryFocusPayout && !queryFocusWithdrawal) return;
     setFocusToken(queryFocusToken);
     setFocusPayoutRef(queryFocusPayout);
-    setFocusTargetTab(queryTab === 'history' ? 'history' : 'wallet');
-  }, [queryFocusPayout, queryFocusToken, queryTab]);
+    setFocusWithdrawalRef(queryFocusWithdrawal);
+    setFocusTargetTab(queryTab === 'history' ? 'history' : queryFocusWithdrawal ? 'history' : 'wallet');
+  }, [queryFocusPayout, queryFocusToken, queryFocusWithdrawal, queryTab]);
 
   useEffect(() => {
     if (queryTab === 'wallet' || queryTab === 'history') {
@@ -130,9 +155,26 @@ export default function AppPage() {
     (next: { focusToken?: string | null; focusPayoutRef?: string | null }) => {
       setFocusToken(next.focusToken ?? null);
       setFocusPayoutRef(next.focusPayoutRef ?? null);
+      setFocusWithdrawalRef(null);
       setFocusTargetTab('history');
       setActiveTab('history');
       router.replace('/app?tab=history');
+    },
+    [router]
+  );
+
+  const handleCreatedWithdrawalFocus = useCallback(
+    (next: { focusWithdrawalRef?: string | null }) => {
+      const withdrawalRef = next.focusWithdrawalRef ?? null;
+      setFocusToken(null);
+      setFocusPayoutRef(null);
+      setFocusWithdrawalRef(withdrawalRef);
+      setFocusTargetTab('history');
+      setActiveTab('history');
+      const params = new URLSearchParams();
+      params.set('tab', 'history');
+      if (withdrawalRef) params.set('focusWithdrawal', withdrawalRef);
+      router.replace(`/app?${params.toString()}`);
     },
     [router]
   );
@@ -180,6 +222,17 @@ export default function AppPage() {
 
   if (!authenticated) {
     return null;
+  }
+
+  if (isCreatingEmbeddedWallet && !walletAddress) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center">
+          <LoadingSpinner size="lg" />
+          <p className="mt-3 text-sm text-gray-400">Setting up your embedded wallet...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -265,6 +318,7 @@ export default function AppPage() {
                 focusToken={focusTargetTab === 'wallet' ? focusToken : null}
                 focusPayoutRef={focusTargetTab === 'wallet' ? focusPayoutRef : null}
                 onClaimedPayoutFocus={handleClaimedPayoutFocus}
+                onCreatedWithdrawalFocus={handleCreatedWithdrawalFocus}
               />
             </div>
             <div
@@ -275,6 +329,7 @@ export default function AppPage() {
               <HistoryPanel
                 focusToken={focusTargetTab === 'history' ? focusToken : null}
                 focusPayoutRef={focusTargetTab === 'history' ? focusPayoutRef : null}
+                focusWithdrawalRef={focusTargetTab === 'history' ? focusWithdrawalRef : null}
                 isActive={activeTab === 'history'}
               />
             </div>

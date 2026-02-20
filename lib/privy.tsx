@@ -25,13 +25,13 @@ export function PrivyProviderWrapper({ children }: { children: React.ReactNode }
     <PrivyProvider
       appId={PRIVY_APP_ID}
       config={{
-        loginMethods: ['email'],
+        loginMethods: ['email', 'google'],
         appearance: {
           theme: 'dark',
           accentColor: '#38bdf8',
           logo: '/logo.png',
           landingHeader: 'Sign in',
-          loginMessage: 'Continue with email',
+          loginMessage: 'Continue with email or Google',
           showWalletLoginFirst: false,
         },
         embeddedWallets: {

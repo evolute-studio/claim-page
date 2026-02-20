@@ -306,11 +306,13 @@ export function WalletPanel({
   focusToken = null,
   focusPayoutRef = null,
   onClaimedPayoutFocus,
+  onCreatedWithdrawalFocus,
 }: {
   isActive?: boolean;
   focusToken?: string | null;
   focusPayoutRef?: string | null;
   onClaimedPayoutFocus?: (next: { focusToken?: string | null; focusPayoutRef?: string | null }) => void;
+  onCreatedWithdrawalFocus?: (next: { focusWithdrawalRef?: string | null }) => void;
 }) {
   const { wallets } = useWallets();
   const { identityToken } = useIdentityToken();
@@ -1111,6 +1113,11 @@ export function WalletPanel({
       }
 
       setWithdrawalStatus('FORWARDING_PENDING');
+      onCreatedWithdrawalFocus?.({
+        focusWithdrawalRef: createResponse.withdrawal_id,
+      });
+      setWithdrawOpen(false);
+      resetFlow();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Withdrawal failed';
       const isUserRejected = /reject|denied|cancelled|canceled/i.test(message);
@@ -1214,6 +1221,9 @@ export function WalletPanel({
     async (mode: 'initial' | 'background' = 'background') => {
       const shouldShowLoading =
         mode === 'initial' && !didInitialClaimableLoadRef.current && claimablePayouts.length === 0;
+      const isNoClaimablePayoutsMessage = (message: string): boolean => {
+        return message.toLowerCase().includes('no claimable');
+      };
       if (shouldShowLoading) setClaimablePayoutsLoading(true);
       setClaimablePayoutsError(null);
       try {
@@ -1227,7 +1237,13 @@ export function WalletPanel({
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'Failed to load claimable payouts';
-        setClaimablePayoutsError(message);
+        if (isNoClaimablePayoutsMessage(message)) {
+          setClaimablePayouts([]);
+          didInitialClaimableLoadRef.current = true;
+          setClaimablePayoutsError(null);
+        } else {
+          setClaimablePayoutsError(message);
+        }
       } finally {
         if (shouldShowLoading) setClaimablePayoutsLoading(false);
       }
@@ -1773,19 +1789,20 @@ export function WalletPanel({
                             {item.tx_hash ? (
                               <div className="flex items-center gap-2 text-[clamp(0.95rem,2.35vw,1.1rem)] leading-5">
                                 <p className="shrink-0 text-gray-500">Tx</p>
-                                <p className="font-num min-w-0 flex-1 truncate text-gray-300">
-                                  {truncateHash(item.tx_hash)}
-                                </p>
                                 {payoutExplorerUrl ? (
                                   <a
                                     href={payoutExplorerUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="shrink-0 font-medium text-gray-200 hover:underline"
+                                    className="font-num min-w-0 flex-1 truncate text-gray-300 hover:text-white hover:underline"
                                   >
-                                    View
+                                    {truncateHash(item.tx_hash)}
                                   </a>
-                                ) : null}
+                                ) : (
+                                  <p className="font-num min-w-0 flex-1 truncate text-gray-300">
+                                    {truncateHash(item.tx_hash)}
+                                  </p>
+                                )}
                               </div>
                             ) : null}
                             {item.failure_reason ? (
