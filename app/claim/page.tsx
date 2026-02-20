@@ -136,12 +136,13 @@ function readUserEmail(user: ReturnType<typeof usePrivy>['user']): string | null
   if (user?.email?.address) return user.email.address;
   const linkedAccounts = user?.linkedAccounts ?? [];
   const linked = linkedAccounts.find((account) => {
-    const raw = account as Record<string, unknown>;
+    const raw = account as unknown as { type?: string; address?: string; email?: string };
     if (raw.type === 'email' && typeof raw.address === 'string') return true;
     if (raw.type === 'google_oauth' && typeof raw.email === 'string') return true;
     return false;
-  }) as { address?: string; email?: string } | undefined;
-  return linked?.address ?? linked?.email ?? null;
+  });
+  const linkedRaw = linked as unknown as { address?: string; email?: string } | undefined;
+  return linkedRaw?.address ?? linkedRaw?.email ?? null;
 }
 
 function maskedEmailMatches(email: string, maskedEmail: string): boolean | null {

@@ -1702,7 +1702,6 @@ export function WalletPanel({
                       ? item.tournament_name.trim()
                       : 'Tournament';
                   const [amountPart, assetPart] = formatClaimablePillAmount(item).split(' ');
-                  const amountLabel = assetPart ? `${amountPart} ${assetPart}` : amountPart;
                   const payoutExplorerUrl = item.tx_hash
                     ? openPayoutExplorerUrl(item.chain, item.tx_hash)
                     : '';

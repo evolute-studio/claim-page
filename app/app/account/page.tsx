@@ -7,6 +7,16 @@ import { ArrowLeft, Check, Copy, KeyRound, LogOut, Mail } from 'lucide-react';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { truncateAddress } from '@/lib/format';
 
+type LinkedAccountView = {
+  type?: string;
+  address?: string;
+  email?: string;
+};
+
+function readLinkedAccount(account: unknown): LinkedAccountView {
+  return (account ?? {}) as LinkedAccountView;
+}
+
 function GoogleMark() {
   return (
     <svg aria-hidden="true" className="h-4 w-4 shrink-0" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
@@ -38,22 +48,23 @@ export default function AccountPage() {
   const emailAddress = useMemo(() => {
     if (user?.email?.address) return user.email.address;
     const linkedEmail = user?.linkedAccounts.find((account) => {
-      const raw = account as Record<string, unknown>;
+      const raw = readLinkedAccount(account);
       if (raw.type === 'email' && typeof raw.address === 'string') return true;
       if (raw.type === 'google_oauth' && typeof raw.email === 'string') return true;
       return false;
-    }) as { address?: string; email?: string } | undefined;
-    return linkedEmail?.address ?? linkedEmail?.email ?? 'No email linked';
+    });
+    const linkedEmailRaw = linkedEmail ? readLinkedAccount(linkedEmail) : null;
+    return linkedEmailRaw?.address ?? linkedEmailRaw?.email ?? 'No email linked';
   }, [user?.email?.address, user?.linkedAccounts]);
   const authProvider = useMemo(() => {
     const linkedAccounts = user?.linkedAccounts ?? [];
     const hasGoogle = linkedAccounts.some((account) => {
-      const raw = account as Record<string, unknown>;
+      const raw = readLinkedAccount(account);
       return raw.type === 'google_oauth';
     });
     if (hasGoogle) return 'Google';
     const hasEmail = linkedAccounts.some((account) => {
-      const raw = account as Record<string, unknown>;
+      const raw = readLinkedAccount(account);
       return raw.type === 'email';
     });
     if (hasEmail) return 'Email';
