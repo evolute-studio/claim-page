@@ -28,6 +28,7 @@ import {
   submitBurnTx,
 } from '@/lib/api';
 import { getCctpConfig, getDestinationChains, getDestinationConfig } from '@/lib/cctp';
+import { getExplorerTxUrl } from '@/lib/explorer';
 import { WithdrawStepAmount } from '@/components/withdraw/WithdrawStepAmount';
 import { WithdrawStepNetwork } from '@/components/withdraw/WithdrawStepNetwork';
 import { WithdrawStepReview } from '@/components/withdraw/WithdrawStepReview';
@@ -948,14 +949,77 @@ export function WalletPanel({
           }
         );
 
+        burnTxHashLocal = transferTx.hash;
         setBurnTxHash(transferTx.hash);
-        setWithdrawalStatus('MINTED');
+        setWithdrawalStatus('BURN_SUBMITTED');
         setForwardTxHash(null);
         if (WITHDRAW_DEBUG_ENABLED) {
           pushDebug('onchain:transfer', 'Base transfer submitted', {
             tx_hash: transferTx.hash,
           });
         }
+
+        const token = await getAuthToken();
+        if (WITHDRAW_DEBUG_ENABLED) {
+          pushDebug('api:create', 'Creating withdrawal after Base transfer confirmation', {
+            quote_id: quote.quote_id,
+            dest_address: destinationAddress.trim(),
+            tx_hash: transferTx.hash,
+          });
+        }
+
+        const createResponse = await createWithdrawal(
+          token,
+          {
+            quote_id: quote.quote_id,
+            dest_address: destinationAddress.trim(),
+          },
+          createIdempotencyKey
+        );
+
+        createdWithdrawalId = createResponse.withdrawal_id;
+        setWithdrawalId(createResponse.withdrawal_id);
+        setWithdrawalStatus(createResponse.status);
+        if (WITHDRAW_DEBUG_ENABLED) {
+          pushDebug('api:create', 'Withdrawal created for Base transfer', {
+            withdrawal_id: createResponse.withdrawal_id,
+            status: createResponse.status,
+          });
+        }
+
+        try {
+          const burnSubmitResponse = await submitBurnTx(
+            token,
+            createResponse.withdrawal_id,
+            transferTx.hash,
+            `${idempotencyBase}:burn:${transferTx.hash.toLowerCase()}`
+          );
+          burnSubmittedToBackend = true;
+          setWithdrawalStatus(burnSubmitResponse.status);
+          if (WITHDRAW_DEBUG_ENABLED) {
+            pushDebug('api:burn-submitted', 'Base transfer tx hash submitted', {
+              withdrawal_id: createResponse.withdrawal_id,
+              tx_hash: transferTx.hash,
+              status: burnSubmitResponse.status,
+            });
+          }
+        } catch (submitError) {
+          if (WITHDRAW_DEBUG_ENABLED) {
+            const submitMessage =
+              submitError instanceof Error ? submitError.message : 'Failed to submit transfer tx hash';
+            pushDebug('api:burn-submitted:error', 'Failed to submit Base transfer tx hash', {
+              withdrawal_id: createResponse.withdrawal_id,
+              tx_hash: transferTx.hash,
+              message: submitMessage,
+            });
+          }
+        }
+
+        onCreatedWithdrawalFocus?.({
+          focusWithdrawalRef: createResponse.withdrawal_id,
+        });
+        setWithdrawOpen(false);
+        resetFlow();
         return;
       }
 
@@ -1198,24 +1262,8 @@ export function WalletPanel({
   }, []);
 
   const openPayoutExplorerUrl = useCallback((chain: string, txHash: string): string => {
-    const normalized = chain.toLowerCase();
-    if (normalized.includes('base')) {
-      return `https://basescan.org/tx/${txHash}`;
-    }
-    if (normalized.includes('arbitrum')) {
-      return `https://arbiscan.io/tx/${txHash}`;
-    }
-    if (normalized.includes('optimism')) {
-      return `https://optimistic.etherscan.io/tx/${txHash}`;
-    }
-    if (normalized.includes('polygon')) {
-      return `https://polygonscan.com/tx/${txHash}`;
-    }
-    if (normalized.includes('ethereum')) {
-      return `https://etherscan.io/tx/${txHash}`;
-    }
-    return '';
-  }, []);
+    return getExplorerTxUrl(chain, txHash, { forceBaseSepolia: config.sourceChain.id === 84532 });
+  }, [config.sourceChain.id]);
 
   const loadClaimablePayouts = useCallback(
     async (mode: 'initial' | 'background' = 'background') => {

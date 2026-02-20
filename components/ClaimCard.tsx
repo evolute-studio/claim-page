@@ -2,6 +2,7 @@
 
 import { PayoutStatus } from '@/types/payout';
 import { truncateAddress } from '@/lib/format';
+import { getExplorerTxUrl } from '@/lib/explorer';
 import { StatusBadge } from './StatusBadge';
 import { LoadingSpinner } from './LoadingSpinner';
 
@@ -134,7 +135,7 @@ export function ClaimCard({
             <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
               <p className="text-xs text-green-400 mb-1">Transaction</p>
               <a
-                href={`https://basescan.org/tx/${txHash}`}
+                href={getExplorerTxUrl(chain, txHash)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm text-green-400 font-mono hover:underline"

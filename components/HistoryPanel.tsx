@@ -5,6 +5,7 @@ import { getIdentityToken, useIdentityToken } from '@privy-io/react-auth';
 import { ChevronDown, Inbox, RotateCw } from 'lucide-react';
 import { getMyPayouts, getMyWithdrawals } from '@/lib/api';
 import { getCctpConfig, getDestinationChains } from '@/lib/cctp';
+import { getExplorerTxUrl } from '@/lib/explorer';
 import { StatusBadge } from '@/components/StatusBadge';
 import { WithdrawalStatusBadge } from '@/components/WithdrawalStatusBadge';
 import { truncateAddress } from '@/lib/format';
@@ -36,14 +37,8 @@ function truncateHash(value: string): string {
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
 }
 
-function openExplorerUrl(chain: string, txHash: string) {
-  const normalized = chain.toLowerCase();
-  if (normalized.includes('base')) return `https://basescan.org/tx/${txHash}`;
-  if (normalized.includes('arbitrum')) return `https://arbiscan.io/tx/${txHash}`;
-  if (normalized.includes('optimism')) return `https://optimistic.etherscan.io/tx/${txHash}`;
-  if (normalized.includes('polygon')) return `https://polygonscan.com/tx/${txHash}`;
-  if (normalized.includes('ethereum')) return `https://etherscan.io/tx/${txHash}`;
-  return '';
+function openExplorerUrl(chain: string, txHash: string, forceBaseSepolia = false) {
+  return getExplorerTxUrl(chain, txHash, { forceBaseSepolia });
 }
 
 function EmptyHistoryState({ view }: { view: HistoryView }) {
@@ -535,7 +530,9 @@ export function HistoryPanel({
                       item.tournament_name && item.tournament_name.trim()
                         ? item.tournament_name.trim()
                         : 'Tournament';
-                    const incomeExplorerUrl = item.tx_hash ? openExplorerUrl(item.chain, item.tx_hash) : '';
+                    const incomeExplorerUrl = item.tx_hash
+                      ? openExplorerUrl(item.chain, item.tx_hash, config.sourceChain.id === 84532)
+                      : '';
                     const incomeDate = formatDate(item.paid_at ?? item.created_at);
 
                     return (

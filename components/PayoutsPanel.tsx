@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getIdentityToken, useIdentityToken, useWallets } from '@privy-io/react-auth';
 import { confirmClaim, confirmClaimByPayoutId, getMyPayouts } from '@/lib/api';
+import { getExplorerTxUrl } from '@/lib/explorer';
 import { PayoutPreview, PayoutStatus } from '@/types/payout';
 import { StatusBadge } from '@/components/StatusBadge';
 import { CoinIcon } from '@/components/CoinIcon';
@@ -39,23 +40,7 @@ function truncateHash(value: string): string {
 }
 
 function openExplorerUrl(chain: string, txHash: string) {
-  const normalized = chain.toLowerCase();
-  if (normalized.includes('base')) {
-    return `https://basescan.org/tx/${txHash}`;
-  }
-  if (normalized.includes('arbitrum')) {
-    return `https://arbiscan.io/tx/${txHash}`;
-  }
-  if (normalized.includes('optimism')) {
-    return `https://optimistic.etherscan.io/tx/${txHash}`;
-  }
-  if (normalized.includes('polygon')) {
-    return `https://polygonscan.com/tx/${txHash}`;
-  }
-  if (normalized.includes('ethereum')) {
-    return `https://etherscan.io/tx/${txHash}`;
-  }
-  return '';
+  return getExplorerTxUrl(chain, txHash);
 }
 
 export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
