@@ -614,6 +614,7 @@ export function WalletPanel({
   const minReceiveMinor = MIN_WITHDRAW_RECEIVE_MINOR;
   const minPayMinor = feeBasisMinor + minReceiveMinor;
   const showQuoteRefreshingHint =
+    destination !== 'base' &&
     !!quote &&
     quoteExpired &&
     !isQuoteLocked &&
@@ -870,36 +871,40 @@ export function WalletPanel({
         return;
       }
 
-      if (!quote || quoteExpired) {
+      if (destination !== 'base' && (!quote || quoteExpired)) {
         setFormError('Quote expired. Please refresh.');
         return;
       }
 
-      if (quote.dest_chain !== destination) {
+      if (destination !== 'base' && quote && quote.dest_chain !== destination) {
         setFormError('Quote mismatch. Please refresh and confirm again.');
         return;
       }
 
-      if (quote.dest_domain_id !== destinationConfig.domainId) {
+      if (destination !== 'base' && quote && quote.dest_domain_id !== destinationConfig.domainId) {
         setFormError('Quote destination mismatch. Please refresh.');
         return;
       }
 
-      const expectedTotalBurnMinor = quote.transfer_amount_usdc_minor + quote.max_fee_usdc_minor;
-      if (quote.total_burn_usdc_minor !== expectedTotalBurnMinor) {
-        setFormError('Quote integrity check failed. Please refresh.');
-        return;
+      if (destination !== 'base' && quote) {
+        const expectedTotalBurnMinor = quote.transfer_amount_usdc_minor + quote.max_fee_usdc_minor;
+        if (quote.total_burn_usdc_minor !== expectedTotalBurnMinor) {
+          setFormError('Quote integrity check failed. Please refresh.');
+          return;
+        }
       }
 
-      if (amountMode === 'pay') {
+      if (destination !== 'base' && amountMode === 'pay' && quote) {
         const payMinor = parsedInputAmount;
         const requiredPay = BigInt(quote.total_burn_usdc_minor);
-        if (payMinor < requiredPay) {
+        if (!payMinor || payMinor < requiredPay) {
           setFormError('Entered pay amount is ниже текущих комиссий. Увеличьте сумму.');
           return;
         }
       }
 
+      const idempotencyQuoteId = quote?.quote_id ?? 'no-quote';
+      const idempotencyAmountMinor = quote?.total_burn_usdc_minor ?? toNumberSafe(parsedInputAmount ?? 0n);
       const showWalletUIs = true;
       const destinationAddressLower = destinationAddress.trim().toLowerCase();
       const idempotencyBase = [
@@ -908,8 +913,8 @@ export function WalletPanel({
         String(config.sourceChain.id),
         destination,
         destinationAddressLower,
-        quote.quote_id,
-        String(quote.total_burn_usdc_minor),
+        idempotencyQuoteId,
+        String(idempotencyAmountMinor),
       ].join(':');
       const createIdempotencyKey = `${idempotencyBase}:create`;
 
@@ -918,7 +923,11 @@ export function WalletPanel({
         setLockedQuote(quote);
         setLockedAmountInput(amountInput);
         setLockedAmountMode(amountMode);
-        const transferAmount = BigInt(quote.transfer_amount_usdc_minor);
+        const transferAmount = BigInt(quote?.transfer_amount_usdc_minor ?? toNumberSafe(parsedInputAmount ?? 0n));
+        if (transferAmount <= 0n) {
+          setFormError('Enter a valid USDC amount');
+          return;
+        }
         if (WITHDRAW_DEBUG_ENABLED) {
           pushDebug('onchain:transfer', 'Sending Base transfer', {
             to: destinationAddress.trim(),
@@ -951,7 +960,6 @@ export function WalletPanel({
 
         burnTxHashLocal = transferTx.hash;
         setBurnTxHash(transferTx.hash);
-        setWithdrawalStatus('BURN_SUBMITTED');
         setForwardTxHash(null);
         if (WITHDRAW_DEBUG_ENABLED) {
           pushDebug('onchain:transfer', 'Base transfer submitted', {
@@ -959,68 +967,117 @@ export function WalletPanel({
           });
         }
 
-        const token = await getAuthToken();
-        if (WITHDRAW_DEBUG_ENABLED) {
-          pushDebug('api:create', 'Creating withdrawal after Base transfer confirmation', {
-            quote_id: quote.quote_id,
-            dest_address: destinationAddress.trim(),
-            tx_hash: transferTx.hash,
-          });
-        }
-
-        const createResponse = await createWithdrawal(
-          token,
-          {
-            quote_id: quote.quote_id,
-            dest_address: destinationAddress.trim(),
-          },
-          createIdempotencyKey
-        );
-
-        createdWithdrawalId = createResponse.withdrawal_id;
-        setWithdrawalId(createResponse.withdrawal_id);
-        setWithdrawalStatus(createResponse.status);
-        if (WITHDRAW_DEBUG_ENABLED) {
-          pushDebug('api:create', 'Withdrawal created for Base transfer', {
-            withdrawal_id: createResponse.withdrawal_id,
-            status: createResponse.status,
-          });
-        }
-
         try {
-          const burnSubmitResponse = await submitBurnTx(
-            token,
-            createResponse.withdrawal_id,
-            transferTx.hash,
-            `${idempotencyBase}:burn:${transferTx.hash.toLowerCase()}`
-          );
-          burnSubmittedToBackend = true;
-          setWithdrawalStatus(burnSubmitResponse.status);
-          if (WITHDRAW_DEBUG_ENABLED) {
-            pushDebug('api:burn-submitted', 'Base transfer tx hash submitted', {
-              withdrawal_id: createResponse.withdrawal_id,
-              tx_hash: transferTx.hash,
-              status: burnSubmitResponse.status,
-            });
+          const token = await getAuthToken();
+          let quoteIdForCreate = quote?.quote_id ?? null;
+
+          // Base transfers should not fail UX because of stale quote;
+          // if needed, fetch a fresh quote just for server-side record.
+          if (!quoteIdForCreate || quoteExpired) {
+            try {
+              const freshQuote = await getWithdrawalQuote(
+                token,
+                {
+                  dest_chain: destination,
+                  transfer_amount_usdc_minor: toNumberSafe(transferAmount),
+                }
+              );
+              quoteIdForCreate = freshQuote.quote_id;
+            } catch (refreshError) {
+              if (WITHDRAW_DEBUG_ENABLED) {
+                const refreshMessage =
+                  refreshError instanceof Error ? refreshError.message : 'Failed to refresh quote for base transfer';
+                pushDebug('api:quote-refresh:error', 'Failed to refresh Base quote for record', {
+                  tx_hash: transferTx.hash,
+                  message: refreshMessage,
+                });
+              }
+            }
           }
-        } catch (submitError) {
+
+          if (quoteIdForCreate) {
+            const createResponse = await createWithdrawal(
+              token,
+              {
+                quote_id: quoteIdForCreate,
+                dest_address: destinationAddress.trim(),
+              },
+              createIdempotencyKey
+            );
+
+            createdWithdrawalId = createResponse.withdrawal_id;
+            setWithdrawalId(createResponse.withdrawal_id);
+            setWithdrawalStatus(createResponse.status);
+            if (WITHDRAW_DEBUG_ENABLED) {
+              pushDebug('api:create', 'Withdrawal created for Base transfer', {
+                withdrawal_id: createResponse.withdrawal_id,
+                status: createResponse.status,
+              });
+            }
+
+            try {
+              const burnSubmitResponse = await submitBurnTx(
+                token,
+                createResponse.withdrawal_id,
+                transferTx.hash,
+                `${idempotencyBase}:burn:${transferTx.hash.toLowerCase()}`
+              );
+              burnSubmittedToBackend = true;
+              setWithdrawalStatus(burnSubmitResponse.status);
+              if (WITHDRAW_DEBUG_ENABLED) {
+                pushDebug('api:burn-submitted', 'Base transfer tx hash submitted', {
+                  withdrawal_id: createResponse.withdrawal_id,
+                  tx_hash: transferTx.hash,
+                  status: burnSubmitResponse.status,
+                });
+              }
+            } catch (submitError) {
+              if (WITHDRAW_DEBUG_ENABLED) {
+                const submitMessage =
+                  submitError instanceof Error ? submitError.message : 'Failed to submit transfer tx hash';
+                pushDebug('api:burn-submitted:error', 'Failed to submit Base transfer tx hash', {
+                  withdrawal_id: createResponse.withdrawal_id,
+                  tx_hash: transferTx.hash,
+                  message: submitMessage,
+                });
+              }
+            }
+          }
+        } catch (recordError) {
           if (WITHDRAW_DEBUG_ENABLED) {
-            const submitMessage =
-              submitError instanceof Error ? submitError.message : 'Failed to submit transfer tx hash';
-            pushDebug('api:burn-submitted:error', 'Failed to submit Base transfer tx hash', {
-              withdrawal_id: createResponse.withdrawal_id,
+            const recordMessage =
+              recordError instanceof Error ? recordError.message : 'Failed to record base transfer';
+            pushDebug('api:create:error', 'Base transfer recorded with non-blocking error', {
               tx_hash: transferTx.hash,
-              message: submitMessage,
+              message: recordMessage,
             });
           }
         }
 
-        onCreatedWithdrawalFocus?.({
-          focusWithdrawalRef: createResponse.withdrawal_id,
-        });
         setWithdrawOpen(false);
         resetFlow();
+        void refreshBalance();
         return;
+      }
+
+      if (!quote) {
+        setFormError('Quote expired. Please refresh.');
+        return;
+      }
+
+      const expectedTotalBurnMinor = quote.transfer_amount_usdc_minor + quote.max_fee_usdc_minor;
+      if (quote.total_burn_usdc_minor !== expectedTotalBurnMinor) {
+        setFormError('Quote integrity check failed. Please refresh.');
+        return;
+      }
+
+      if (amountMode === 'pay') {
+        const payMinor = parsedInputAmount;
+        const requiredPay = BigInt(quote.total_burn_usdc_minor);
+        if (!payMinor || payMinor < requiredPay) {
+          setFormError('Entered pay amount is ниже текущих комиссий. Увеличьте сумму.');
+          return;
+        }
       }
 
       setLockedQuote(quote);
@@ -1458,6 +1515,7 @@ export function WalletPanel({
       destinationAddressTrimmed.length > 0 && isAddress(destinationAddressTrimmed);
     const hasDestinationAddressError =
       destinationAddressTrimmed.length > 0 && !isDestinationAddressValid;
+    const requiresBridgeQuote = destination !== 'base';
     const reviewConfirmDisabled =
       sending ||
       isProcessingWithdrawal ||
@@ -1465,16 +1523,20 @@ export function WalletPanel({
       !parsedInputAmount ||
       !destinationConfig ||
       !isDestinationAddressValid ||
-      quoteLoading ||
-      !quote ||
-      quoteExpired ||
+      (requiresBridgeQuote && quoteLoading) ||
+      (requiresBridgeQuote && !quote) ||
+      (requiresBridgeQuote && quoteExpired) ||
       insufficientBalance ||
       belowMinReceive ||
       config.errors.length > 0;
     const reviewConfirmLabel = sending
-      ? 'Submitting...'
+      ? destination === 'base'
+        ? 'Sending...'
+        : 'Submitting...'
       : isProcessingWithdrawal
-        ? 'Processing...'
+        ? destination === 'base'
+          ? 'Finalizing...'
+          : 'Processing...'
         : 'Confirm';
     return (
       <div className="withdraw-flow font-num fixed inset-0 z-50 bg-[#0a0a0a]">
