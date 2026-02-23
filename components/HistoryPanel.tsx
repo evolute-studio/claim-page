@@ -23,6 +23,19 @@ const VIEW_STAGGER_ROW_PX = 92;
 const PAYOUT_HIGHLIGHT_DURATION_MS = 2800;
 const PAYOUT_HIGHLIGHT_SCROLL_DELAY_MS = 90;
 
+function scrollRowToListCenter(row: HTMLDivElement, list: HTMLDivElement) {
+  const rowRect = row.getBoundingClientRect();
+  const listRect = list.getBoundingClientRect();
+  const currentTop = list.scrollTop;
+  const rowOffsetWithinList = rowRect.top - listRect.top;
+  const targetTop = Math.max(
+    0,
+    currentTop + rowOffsetWithinList - list.clientHeight / 2 + rowRect.height / 2
+  );
+
+  list.scrollTo({ top: targetTop, behavior: 'smooth' });
+}
+
 function formatUsdc(minor: number): string {
   return (minor / 1_000_000).toFixed(2);
 }
@@ -239,8 +252,9 @@ export function HistoryPanel({
 
     const timerId = window.setTimeout(() => {
       const row = incomeRowRefsRef.current[focusedIncomeId];
-      if (row) {
-        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      const list = incomesListRef.current;
+      if (row && list) {
+        scrollRowToListCenter(row, list);
       }
       setHighlightedIncomeId(focusedIncomeId);
       if (highlightIncomeTimeoutRef.current) {
@@ -268,8 +282,9 @@ export function HistoryPanel({
 
     const timerId = window.setTimeout(() => {
       const row = outcomeRowRefsRef.current[focusedOutcomeId];
-      if (row) {
-        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      const list = outcomesListRef.current;
+      if (row && list) {
+        scrollRowToListCenter(row, list);
       }
       setHighlightedOutcomeId(focusedOutcomeId);
       if (highlightOutcomeTimeoutRef.current) {
