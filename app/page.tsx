@@ -21,12 +21,28 @@ function GoogleIcon() {
   );
 }
 
+function AppleIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-5 w-5 shrink-0"
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M15.192 4.413c.878-1.056 1.481-2.496 1.32-3.913-1.266.053-2.829.845-3.735 1.9-.821.948-1.535 2.413-1.346 3.803 1.426.107 2.857-.738 3.761-1.79ZM20.564 17.808c-.564 1.281-.842 1.852-1.568 2.984-1.013 1.581-2.442 3.551-4.214 3.565-1.577.015-1.983-1.03-4.123-1.019-2.142.013-2.589 1.039-4.167 1.023-1.771-.015-3.124-1.79-4.136-3.37-2.833-4.427-3.129-9.626-1.381-12.361 1.245-1.954 3.213-3.097 5.06-3.097 1.886 0 3.073 1.034 4.628 1.034 1.51 0 2.43-1.036 4.612-1.036 1.646 0 3.389.919 4.633 2.503-4.073 2.34-3.414 8.283.656 9.774Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 export default function Home() {
   const router = useRouter();
   const { ready, authenticated } = usePrivy();
-  const { initOAuth, loading: googleLoginLoading } = useLoginWithOAuth();
+  const { initOAuth, loading: oauthLoginLoading } = useLoginWithOAuth();
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
-  const [googleLoginError, setGoogleLoginError] = useState<string | null>(null);
+  const [oauthLoginError, setOauthLoginError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!ready || !authenticated) return;
@@ -34,11 +50,20 @@ export default function Home() {
   }, [ready, authenticated, router]);
 
   const handleGoogleLogin = async () => {
-    setGoogleLoginError(null);
+    setOauthLoginError(null);
     try {
       await initOAuth({ provider: 'google' });
     } catch {
-      setGoogleLoginError('Google sign-in failed. Try again.');
+      setOauthLoginError('Google sign-in failed. Try again.');
+    }
+  };
+
+  const handleAppleLogin = async () => {
+    setOauthLoginError(null);
+    try {
+      await initOAuth({ provider: 'apple' });
+    } catch {
+      setOauthLoginError('Apple sign-in failed. Try again.');
     }
   };
 
@@ -86,14 +111,24 @@ export default function Home() {
           <button
             type="button"
             onClick={() => void handleGoogleLogin()}
-            disabled={!ready || googleLoginLoading}
+            disabled={!ready || oauthLoginLoading}
             className="interactive-fx no-shimmer mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.07] disabled:border-white/12 disabled:bg-white/10 disabled:text-white/40"
           >
             <GoogleIcon />
-            {googleLoginLoading ? 'Redirecting to Google...' : 'Continue with Google'}
+            {oauthLoginLoading ? 'Redirecting to Google...' : 'Continue with Google'}
           </button>
 
-          {googleLoginError ? <p className="mt-2 text-xs text-red-300">{googleLoginError}</p> : null}
+          <button
+            type="button"
+            onClick={() => void handleAppleLogin()}
+            disabled={!ready || oauthLoginLoading}
+            className="interactive-fx no-shimmer mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.07] disabled:border-white/12 disabled:bg-white/10 disabled:text-white/40"
+          >
+            <AppleIcon />
+            {oauthLoginLoading ? 'Redirecting to Apple...' : 'Continue with Apple'}
+          </button>
+
+          {oauthLoginError ? <p className="mt-2 text-xs text-red-300">{oauthLoginError}</p> : null}
 
           <p className="mt-3 text-xs text-gray-500">Secure sign-in powered by Privy</p>
         </section>
