@@ -231,7 +231,12 @@ const NETWORK_ICON_PRELOAD_URLS = Array.from(
 );
 const CLAIMABLE_HIGHLIGHT_DURATION_MS = 2800;
 const CLAIMABLE_HIGHLIGHT_SCROLL_DELAY_MS = 90;
-const FINAL_PAYOUT_STATUSES = new Set(['PAID', 'FAILED', 'EXPIRED', 'CANCELLED'] as const);
+const FINAL_PAYOUT_STATUSES = new Set<PayoutPreview['status']>([
+  'PAID',
+  'FAILED',
+  'EXPIRED',
+  'CANCELLED',
+]);
 
 function getWalletPayoutSortPriority(status: PayoutPreview['status']): number {
   if (status === 'CREATED') return 0;

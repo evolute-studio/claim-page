@@ -1,10 +1,12 @@
 import type { Metadata, Viewport } from 'next';
-import { Outfit } from 'next/font/google';
+import localFont from 'next/font/local';
 import { PrivyProviderWrapper } from '@/lib/privy';
 import './globals.css';
 
-const appFont = Outfit({
-  subsets: ['latin'],
+const appFont = localFont({
+  src: '../public/fonts/Outfit-Variable.woff2',
+  weight: '100 900',
+  style: 'normal',
   variable: '--font-text',
   display: 'swap',
 });
