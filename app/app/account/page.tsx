@@ -28,6 +28,17 @@ function GoogleMark() {
   );
 }
 
+function SignInMethodIcon({ provider }: { provider: string }) {
+  if (provider === 'Google') return <GoogleMark />;
+  if (provider === 'Email') return null;
+
+  return (
+    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/20">
+      <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
+    </span>
+  );
+}
+
 export default function AccountPage() {
   const router = useRouter();
   const { wallets } = useWallets();
@@ -179,8 +190,12 @@ export default function AccountPage() {
             <p className="font-num text-base font-semibold tracking-[0.01em] text-white">Account details</p>
             <div className="mt-3 space-y-2">
               <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2.5">
-                <span className="inline-flex items-center gap-2 text-sm text-gray-300">
-                  {authProvider === 'Google' ? <GoogleMark /> : <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/20 text-[10px] font-semibold text-white">A</span>}
+                <span
+                  className={`inline-flex items-center text-sm text-gray-300 ${
+                    authProvider === 'Email' ? '' : 'gap-2'
+                  }`}
+                >
+                  {authProvider === 'Email' ? null : <SignInMethodIcon provider={authProvider} />}
                   Sign-in method
                 </span>
                 <span className="font-num text-right text-sm text-white">{authProvider}</span>
