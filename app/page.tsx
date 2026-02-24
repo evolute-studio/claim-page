@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { useLoginWithOAuth, usePrivy } from '@privy-io/react-auth';
 import { EmailLoginSheet } from '@/components/auth/EmailLoginSheet';
 
@@ -34,6 +35,21 @@ function AppleIcon() {
         fill="currentColor"
       />
     </svg>
+  );
+}
+
+function EvoluteTopLogo() {
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-[42vh] min-h-32 max-h-72 items-center justify-center">
+      <Image
+        src="/logo.svg"
+        alt="Evolute"
+        width={170}
+        height={44}
+        priority
+        className="h-auto w-[150px]"
+      />
+    </div>
   );
 }
 
@@ -73,6 +89,7 @@ export default function Home() {
         <div className="absolute -left-24 top-16 h-64 w-64 rounded-full bg-white/[0.04] blur-3xl" />
         <div className="absolute -right-20 bottom-24 h-72 w-72 rounded-full bg-white/[0.03] blur-3xl" />
       </div>
+      <EvoluteTopLogo />
 
       <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-8">
         <section className="relative animate-fade-in-up overflow-hidden rounded-3xl border border-white/10 bg-[#111111]/95 p-6 text-center shadow-[0_24px_64px_rgba(0,0,0,0.5)]">

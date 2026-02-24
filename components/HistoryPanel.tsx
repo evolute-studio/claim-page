@@ -541,6 +541,9 @@ export function HistoryPanel({
                       item.id ?? item.payout_id ?? item.claim_token ?? `${item.status}-${item.expires_at}`;
                     const isHighlighted = highlightedIncomeId === itemId;
                     const isExpanded = expandedIncomeId === itemId;
+                    const toggleIncomeExpanded = () => {
+                      setExpandedIncomeId((current) => (current === itemId ? null : itemId));
+                    };
                     const tournamentName =
                       item.tournament_name && item.tournament_name.trim()
                         ? item.tournament_name.trim()
@@ -566,7 +569,20 @@ export function HistoryPanel({
                         }}
                       >
                         <div className="flex flex-col">
-                          <div className="flex h-[68px] shrink-0 items-center justify-between gap-3 p-3">
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={toggleIncomeExpanded}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                toggleIncomeExpanded();
+                              }
+                            }}
+                            className="flex h-[68px] shrink-0 cursor-pointer items-center justify-between gap-3 p-3"
+                            aria-label={isExpanded ? 'Collapse payout details' : 'Expand payout details'}
+                            aria-expanded={isExpanded}
+                          >
                             <div className="min-w-0 flex-1">
                               <p className="font-num truncate text-base font-semibold leading-5 text-white">
                                 {formatUsdc(item.amount_minor_units)} <span className="text-gray-400">USDC</span>
@@ -577,9 +593,10 @@ export function HistoryPanel({
                               <StatusBadge status={item.status} />
                               <button
                                 type="button"
-                                onClick={() =>
-                                  setExpandedIncomeId((current) => (current === itemId ? null : itemId))
-                                }
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  toggleIncomeExpanded();
+                                }}
                                 className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-100 transition hover:bg-white/10"
                                 aria-label={isExpanded ? 'Collapse payout details' : 'Expand payout details'}
                                 aria-expanded={isExpanded}
@@ -670,6 +687,9 @@ export function HistoryPanel({
                     const destinationLabel =
                       destinations.find((dest) => dest.key === item.dest_chain)?.label ?? item.dest_chain;
                     const isExpanded = expandedOutcomeId === item.id;
+                    const toggleOutcomeExpanded = () => {
+                      setExpandedOutcomeId((current) => (current === item.id ? null : item.id));
+                    };
                     const destinationExplorerBase = getDestinationExplorer(item.dest_chain);
                     const destinationValue = item.dest_address
                       ? `${destinationLabel} • ${truncateAddress(item.dest_address)}`
@@ -691,7 +711,20 @@ export function HistoryPanel({
                         }}
                       >
                         <div className="flex flex-col">
-                          <div className="flex h-[68px] shrink-0 items-center justify-between gap-3 p-3">
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={toggleOutcomeExpanded}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                toggleOutcomeExpanded();
+                              }
+                            }}
+                            className="flex h-[68px] shrink-0 cursor-pointer items-center justify-between gap-3 p-3"
+                            aria-label={isExpanded ? 'Collapse withdrawal details' : 'Expand withdrawal details'}
+                            aria-expanded={isExpanded}
+                          >
                             <div className="min-w-0 flex-1">
                               <p className="font-num truncate text-base font-semibold leading-5 text-white">
                                 {formatUsdc(item.transfer_amount_usdc_minor)}{' '}
@@ -703,9 +736,10 @@ export function HistoryPanel({
                               <WithdrawalStatusBadge status={item.status} />
                               <button
                                 type="button"
-                                onClick={() =>
-                                  setExpandedOutcomeId((current) => (current === item.id ? null : item.id))
-                                }
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  toggleOutcomeExpanded();
+                                }}
                                 className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-100 transition hover:bg-white/10"
                                 aria-label={isExpanded ? 'Collapse withdrawal details' : 'Expand withdrawal details'}
                                 aria-expanded={isExpanded}
