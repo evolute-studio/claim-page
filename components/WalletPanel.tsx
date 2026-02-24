@@ -1791,7 +1791,7 @@ export function WalletPanel({
           style={{ transitionDelay: '140ms' }}
         >
           <div className="mb-2">
-            <p className="text-xs uppercase tracking-[0.14em] text-gray-500">Claimable payouts</p>
+            <p className="text-xs uppercase tracking-[0.14em] text-gray-500">Tournament payouts</p>
           </div>
 
           {claimablePayoutsError && (
@@ -1835,6 +1835,7 @@ export function WalletPanel({
                     item.id ?? item.payout_id ?? item.claim_token ?? `${item.status}-${item.expires_at}`;
                   const hasClaimRef = !!item.claim_token || !!item.payout_id || !!item.id;
                   const canClaim = item.status === 'CREATED' && hasClaimRef && !!activeWalletAddress;
+                  const shouldUseClaimableShimmer = canClaim;
                   const isClaiming = claimingPayoutId === key;
                   const isHighlighted = highlightedClaimableId === key;
                   const isFlipped = flippedClaimableId === key;
@@ -1868,7 +1869,9 @@ export function WalletPanel({
                       <div className="history-flip-scene h-full">
                         <div className={`history-flip-card h-full ${isFlipped ? 'is-flipped' : ''}`}>
                           <div
-                            className={`history-flip-face history-flip-face--front claimable-metal-pill rounded-2xl border border-white/[0.08] transition-colors duration-200 group-hover:border-white/[0.14] ${
+                            className={`history-flip-face history-flip-face--front rounded-2xl border border-white/[0.08] transition-colors duration-200 group-hover:border-white/[0.14] ${
+                              shouldUseClaimableShimmer ? 'claimable-metal-pill' : 'bg-white/[0.015]'
+                            } ${
                               canClaim ? 'p-4' : 'p-3.5'
                             }`}
                           >
@@ -1883,7 +1886,13 @@ export function WalletPanel({
                                     {amountPart}
                                     {assetPart ? <span className="ml-1 text-gray-400">{assetPart}</span> : null}
                                   </p>
-                                  <p className="truncate text-xs leading-4 text-gray-500">{walletStatusLabel}</p>
+                                  <p
+                                    className={`truncate leading-4 text-gray-500 ${
+                                      canClaim ? 'text-[0.95rem]' : 'text-xs'
+                                    }`}
+                                  >
+                                    {walletStatusLabel}
+                                  </p>
                                 </div>
                                 <button
                                   type="button"
