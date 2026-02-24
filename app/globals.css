@@ -110,6 +110,15 @@ body {
   }
 }
 
+@keyframes evoluteWordFlow {
+  0% {
+    background-position: 220% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
 @keyframes claimCtaPulse {
   0%,
   100% {
@@ -255,6 +264,25 @@ body {
     0 14px 28px rgba(0, 0, 0, 0.34);
 }
 
+.evolute-wallet-shimmer {
+  color: rgba(184, 194, 209, 0.85);
+  background-image: linear-gradient(
+    112deg,
+    rgba(124, 138, 160, 0.72) 0%,
+    rgba(225, 232, 241, 0.95) 18%,
+    rgba(165, 178, 198, 0.84) 36%,
+    rgba(234, 241, 250, 0.97) 52%,
+    rgba(142, 156, 178, 0.8) 70%,
+    rgba(226, 233, 242, 0.94) 86%,
+    rgba(124, 138, 160, 0.72) 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: evoluteWordFlow 5.6s linear infinite;
+}
+
 .claimable-cta-button {
   border-color: rgba(92, 227, 172, 0.5);
   background-color: rgba(16, 185, 129, 0.2);
@@ -393,6 +421,11 @@ body {
   .withdraw-quote-danger-text-pulse,
   .withdraw-quote-danger-pill-pulse {
     animation: none;
+  }
+
+  .evolute-wallet-shimmer {
+    animation: none;
+    background-position: 50% 50%;
   }
 
   .history-flip-card {

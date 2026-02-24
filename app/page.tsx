@@ -110,7 +110,7 @@ export default function Home() {
             className="pointer-events-none absolute right-8 top-8 h-1.5 w-1.5 rounded-full bg-white/25"
           />
 
-          <div className="mb-4 text-xs font-medium tracking-[0.14em] text-gray-400">
+          <div className="evolute-wallet-shimmer mb-4 text-xs font-medium tracking-[0.14em]">
             EVOLUTE WALLET
           </div>
 
