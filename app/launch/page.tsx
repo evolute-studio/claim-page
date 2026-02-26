@@ -26,6 +26,9 @@ type ConflictState = {
   emailHint: string | null;
 };
 
+const exchangeSuccessCache = new Map<string, WalletExchangeCodeSuccess>();
+const exchangeInFlightCache = new Map<string, Promise<WalletExchangeCodeSuccess>>();
+
 function EvoluteTopLogo() {
   return (
     <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-[42vh] min-h-32 max-h-72 items-center justify-center">
@@ -159,6 +162,38 @@ function buildAppDestination(exchange: WalletExchangeCodeSuccess): string {
   return `/app?${params.toString()}`;
 }
 
+function getExchangeCacheKey(code: string, token: string): string {
+  return `${code}::${token}`;
+}
+
+async function exchangeLaunchCodeSingle(
+  key: string,
+  payload: {
+    code: string;
+    token?: string;
+    client_nonce: string;
+  },
+  options: { deviceId?: string | null }
+): Promise<WalletExchangeCodeSuccess> {
+  const cached = exchangeSuccessCache.get(key);
+  if (cached) return cached;
+
+  const inFlight = exchangeInFlightCache.get(key);
+  if (inFlight) return inFlight;
+
+  const request = exchangeWalletLaunchCode(payload, options)
+    .then((result) => {
+      exchangeSuccessCache.set(key, result);
+      return result;
+    })
+    .finally(() => {
+      exchangeInFlightCache.delete(key);
+    });
+
+  exchangeInFlightCache.set(key, request);
+  return request;
+}
+
 function LaunchContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -170,6 +205,7 @@ function LaunchContent() {
   const [errorState, setErrorState] = useState<LaunchErrorState | null>(null);
   const [conflictState, setConflictState] = useState<ConflictState | null>(null);
   const [busy, setBusy] = useState(false);
+  const exchangeCacheKey = useMemo(() => getExchangeCacheKey(code, token), [code, token]);
 
   const deviceIdRef = useRef<string | null>(null);
   const launchStartedRef = useRef(false);
@@ -275,9 +311,10 @@ function LaunchContent() {
           return;
         }
 
-        let exchange = exchangeResponseRef.current;
-        if (!exchange || mode === 'retry') {
-          exchange = await exchangeWalletLaunchCode(
+        let exchange = exchangeResponseRef.current ?? exchangeSuccessCache.get(exchangeCacheKey) ?? null;
+        if (!exchange) {
+          exchange = await exchangeLaunchCodeSingle(
+            exchangeCacheKey,
             {
               code,
               ...(token ? { token } : {}),
@@ -336,7 +373,16 @@ function LaunchContent() {
         setBusy(false);
       }
     },
-    [code, finalizeSuccess, logout, router, setLaunchJwt, token, waitForCustomJwtLogin]
+    [
+      code,
+      exchangeCacheKey,
+      finalizeSuccess,
+      logout,
+      router,
+      setLaunchJwt,
+      token,
+      waitForCustomJwtLogin,
+    ]
   );
 
   useEffect(() => {
