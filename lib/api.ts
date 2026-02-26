@@ -15,6 +15,141 @@ import type {
 } from '@/types/withdrawal';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL;
+const WALLET_REQUEST_TIMEOUT_MS = 8_000;
+
+export type WalletSessionConflictPolicy =
+  | 'prompt_switch'
+  | 'force_switch'
+  | 'deny_if_mismatch';
+
+export type WalletExchangeErrorCode =
+  | 'CODE_NOT_FOUND'
+  | 'CODE_EXPIRED'
+  | 'CODE_ALREADY_USED'
+  | 'DEVICE_MISMATCH'
+  | 'PAYOUT_TOKEN_REQUIRED'
+  | 'PAYOUT_TOKEN_INVALID'
+  | 'PRIVY_AUTH_NOT_CONFIGURED'
+  | 'RATE_LIMITED'
+  | 'VALIDATION_ERROR'
+  | 'INTERNAL_ERROR'
+  | 'NETWORK_ERROR'
+  | 'TIMEOUT';
+
+export type WalletExchangeCodeRequest = {
+  code: string;
+  token?: string;
+  client_nonce: string;
+};
+
+export type WalletSessionLinkedRequest = {
+  external_user_id: string;
+  privy_user_id: string;
+  status: 'success';
+};
+
+type WalletExchangeCodeErrorPayload = {
+  error_code?: string;
+  message?: string;
+};
+
+export type WalletExchangeCodeSuccess = {
+  auth_type: 'custom_jwt' | string;
+  jwt: string;
+  expires_in_sec: number;
+  expected_user: {
+    external_user_id: string;
+    email_hint?: string;
+  };
+  session_conflict_policy: WalletSessionConflictPolicy;
+  wallet_intent?: {
+    screen?: string;
+    [key: string]: unknown;
+  };
+  payout_context?: {
+    payout_id?: string;
+    claim_token?: string;
+    [key: string]: unknown;
+  };
+};
+
+export class WalletApiError extends Error {
+  code: WalletExchangeErrorCode;
+  status: number;
+
+  constructor(message: string, code: WalletExchangeErrorCode, status = 0) {
+    super(message);
+    this.name = 'WalletApiError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+function readWalletErrorCode(raw: unknown): WalletExchangeErrorCode {
+  if (typeof raw !== 'string') return 'INTERNAL_ERROR';
+  if (
+    raw === 'CODE_NOT_FOUND' ||
+    raw === 'CODE_EXPIRED' ||
+    raw === 'CODE_ALREADY_USED' ||
+    raw === 'DEVICE_MISMATCH' ||
+    raw === 'PAYOUT_TOKEN_REQUIRED' ||
+    raw === 'PAYOUT_TOKEN_INVALID' ||
+    raw === 'PRIVY_AUTH_NOT_CONFIGURED' ||
+    raw === 'RATE_LIMITED' ||
+    raw === 'VALIDATION_ERROR' ||
+    raw === 'INTERNAL_ERROR'
+  ) {
+    return raw;
+  }
+  return 'INTERNAL_ERROR';
+}
+
+function readWalletErrorMessage(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== 'object') return fallback;
+  const record = payload as Record<string, unknown>;
+  if (typeof record.message === 'string' && record.message.trim()) {
+    return record.message.trim();
+  }
+  return fallback;
+}
+
+async function fetchWalletJson<T>(
+  path: string,
+  init: RequestInit,
+  fallbackErrorMessage: string
+): Promise<T> {
+  const apiBase = getApiBaseOrThrow();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), WALLET_REQUEST_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(`${apiBase}${path}`, {
+      ...init,
+      signal: controller.signal,
+    });
+    const data = (await res.json().catch(() => ({}))) as
+      | WalletExchangeCodeErrorPayload
+      | Record<string, unknown>;
+
+    if (!res.ok) {
+      const code = readWalletErrorCode((data as WalletExchangeCodeErrorPayload).error_code);
+      const message = readWalletErrorMessage(data, fallbackErrorMessage);
+      throw new WalletApiError(message, code, res.status);
+    }
+
+    return data as T;
+  } catch (error: unknown) {
+    if (error instanceof WalletApiError) {
+      throw error;
+    }
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new WalletApiError('Request timed out. Please try again.', 'TIMEOUT');
+    }
+    throw new WalletApiError('Network error. Check connection and try again.', 'NETWORK_ERROR');
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 function getApiBaseOrThrow(): string {
   const value = API_BASE?.trim();
@@ -30,6 +165,56 @@ function getAuthHeaders(privyIdentityToken: string): Record<string, string> {
   return {
     Authorization: `Bearer ${privyIdentityToken}`,
   };
+}
+
+export async function exchangeWalletLaunchCode(
+  payload: WalletExchangeCodeRequest,
+  options?: {
+    deviceId?: string | null;
+  }
+): Promise<WalletExchangeCodeSuccess> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  const normalizedDeviceId = options?.deviceId?.trim();
+  if (normalizedDeviceId) {
+    headers['X-Device-Id'] = normalizedDeviceId;
+  }
+
+  return fetchWalletJson<WalletExchangeCodeSuccess>(
+    '/v1/wallet/exchange-code',
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    },
+    'Failed to launch wallet'
+  );
+}
+
+export async function markWalletSessionLinked(
+  payload: WalletSessionLinkedRequest,
+  options?: {
+    deviceId?: string | null;
+  }
+): Promise<void> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  const normalizedDeviceId = options?.deviceId?.trim();
+  if (normalizedDeviceId) {
+    headers['X-Device-Id'] = normalizedDeviceId;
+  }
+
+  await fetchWalletJson<Record<string, unknown>>(
+    '/v1/wallet/session-linked',
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    },
+    'Failed to confirm wallet session'
+  );
 }
 
 const DEST_DOMAIN_BY_CHAIN: Record<DestinationChain, number> = {
