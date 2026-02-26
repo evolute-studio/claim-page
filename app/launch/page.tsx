@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
-import { usePrivy, useSyncJwtBasedAuthState } from '@privy-io/react-auth';
+import { usePrivy, useSubscribeToJwtAuthWithFlag } from '@privy-io/react-auth';
 import type { User } from '@privy-io/react-auth';
 import {
   exchangeWalletLaunchCode,
@@ -14,7 +14,7 @@ import {
 } from '@/lib/api';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 
-type LaunchScreen = 'loading' | 'open_from_game' | 'session_conflict' | 'error';
+type LaunchScreen = 'loading' | 'open_from_game' | 'session_conflict' | 'sign_in_required' | 'error';
 
 type LaunchErrorState = {
   title: string;
@@ -23,6 +23,10 @@ type LaunchErrorState = {
 };
 
 type ConflictState = {
+  emailHint: string | null;
+};
+
+type SignInRequiredState = {
   emailHint: string | null;
 };
 
@@ -58,12 +62,6 @@ function generateClientNonce(): string {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
 }
 
 function parseDeviceIdFromCookie(cookie: string): string | null {
@@ -106,6 +104,14 @@ function clearLaunchQueryParams() {
   const query = url.searchParams.toString();
   const next = `${url.pathname}${query ? `?${query}` : ''}${url.hash}`;
   window.history.replaceState(window.history.state, '', next);
+}
+
+function buildSignInRouteFromCurrentLocation(): string {
+  if (typeof window === 'undefined') {
+    return '/';
+  }
+  const returnTo = `${window.location.pathname}${window.location.search}`;
+  return `/?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
 function toLaunchErrorState(error: unknown): LaunchErrorState {
@@ -204,6 +210,8 @@ function LaunchContent() {
   const [screen, setScreen] = useState<LaunchScreen>('loading');
   const [errorState, setErrorState] = useState<LaunchErrorState | null>(null);
   const [conflictState, setConflictState] = useState<ConflictState | null>(null);
+  const [signInRequiredState, setSignInRequiredState] = useState<SignInRequiredState | null>(null);
+  const [externalJwt, setExternalJwt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const exchangeCacheKey = useMemo(() => getExchangeCacheKey(code, token), [code, token]);
 
@@ -211,11 +219,11 @@ function LaunchContent() {
   const launchStartedRef = useRef(false);
   const flowLockRef = useRef(false);
   const exchangeResponseRef = useRef<WalletExchangeCodeSuccess | null>(null);
+  const jwtAttemptedRef = useRef(false);
+  const externalJwtRef = useRef<string | null>(null);
   const readyRef = useRef(ready);
   const authenticatedRef = useRef(authenticated);
   const userRef = useRef(user);
-  const jwtValueRef = useRef<string | undefined>(undefined);
-  const jwtSubscribersRef = useRef(new Set<() => void>());
 
   useEffect(() => {
     readyRef.current = ready;
@@ -223,54 +231,23 @@ function LaunchContent() {
     userRef.current = user;
   }, [ready, authenticated, user]);
 
-  const subscribeJwtAuth = useCallback((onAuthStateChange: () => void) => {
-    jwtSubscribersRef.current.add(onAuthStateChange);
-    return () => {
-      jwtSubscribersRef.current.delete(onAuthStateChange);
-    };
-  }, []);
+  useEffect(() => {
+    externalJwtRef.current = externalJwt;
+  }, [externalJwt]);
 
-  const notifyJwtAuthChanged = useCallback(() => {
-    for (const listener of jwtSubscribersRef.current) {
-      listener();
-    }
-  }, []);
-
-  const setLaunchJwt = useCallback(
-    (value: string | undefined) => {
-      jwtValueRef.current = value;
-      notifyJwtAuthChanged();
-    },
-    [notifyJwtAuthChanged]
-  );
-
-  useSyncJwtBasedAuthState({
-    enabled: true,
-    subscribe: subscribeJwtAuth,
-    getExternalJwt: useCallback(async () => jwtValueRef.current, []),
+  const { state: jwtAuthState } = useSubscribeToJwtAuthWithFlag({
+    enabled: Boolean(externalJwt),
+    isAuthenticated: Boolean(externalJwt),
+    isLoading: false,
+    getExternalJwt: useCallback(async () => externalJwtRef.current ?? undefined, []),
   });
+  const jwtAuthStateRef = useRef(jwtAuthState);
+
+  useEffect(() => {
+    jwtAuthStateRef.current = jwtAuthState;
+  }, [jwtAuthState]);
 
   const currentExternalUserId = useMemo(() => normalizeExternalUserId(user), [user]);
-
-  const waitForCustomJwtLogin = useCallback(async (expectedExternalUserId: string): Promise<User> => {
-    const startedAt = Date.now();
-    const timeoutMs = 15_000;
-
-    while (Date.now() - startedAt < timeoutMs) {
-      if (readyRef.current && authenticatedRef.current && userRef.current) {
-        const currentExternal = normalizeExternalUserId(userRef.current);
-        if (currentExternal === expectedExternalUserId) {
-          return userRef.current;
-        }
-      }
-      await sleep(120);
-    }
-
-    throw new WalletApiError(
-      'Could not complete sign-in from launch link. Please try again.',
-      'INTERNAL_ERROR'
-    );
-  }, []);
 
   const finalizeSuccess = useCallback(
     async (exchange: WalletExchangeCodeSuccess, externalUserId: string, privyUserId: string) => {
@@ -298,6 +275,7 @@ function LaunchContent() {
       setBusy(true);
       setErrorState(null);
       setConflictState(null);
+      setSignInRequiredState(null);
       setScreen('loading');
 
       try {
@@ -330,21 +308,64 @@ function LaunchContent() {
           throw new WalletApiError('Invalid launch API response.', 'INTERNAL_ERROR');
         }
 
+        const redirectToLogin = async (logoutFirst: boolean) => {
+          if (logoutFirst) {
+            await logout();
+          }
+          router.replace(buildSignInRouteFromCurrentLocation());
+        };
+
         if (!authenticatedRef.current || !userRef.current) {
-          setLaunchJwt(exchange.jwt);
-          const loggedInUser = await waitForCustomJwtLogin(expectedExternalUserId);
-          await finalizeSuccess(exchange, expectedExternalUserId, loggedInUser.id);
+          const launchJwt = exchange.jwt?.trim() ?? '';
+          if (launchJwt) {
+            const jwtState = jwtAuthStateRef.current;
+            // One controlled JWT auth attempt for this launch flow.
+            if (!jwtAttemptedRef.current) {
+              jwtAttemptedRef.current = true;
+              setExternalJwt(launchJwt);
+              setScreen('loading');
+              return;
+            }
+            if (jwtState.status === 'loading') {
+              setScreen('loading');
+              return;
+            }
+            if (jwtState.status === 'error') {
+              const message =
+                jwtState.error?.message?.includes('server-side authentication') ||
+                jwtState.error?.message?.includes('only server-side')
+                  ? 'Privy JWT auth is set to Server side. For browser JWT login, switch Privy JWT environment to Client side.'
+                  : jwtState.error?.message ?? 'Failed to authenticate with JWT.';
+              setErrorState({
+                title: 'JWT sign-in failed',
+                message,
+              });
+              setScreen('error');
+              return;
+            }
+          }
+
+          if (mode === 'force_switch') {
+            await redirectToLogin(false);
+            return;
+          }
+          setSignInRequiredState({
+            emailHint: exchange.expected_user.email_hint ?? null,
+          });
+          setScreen('sign_in_required');
           return;
         }
 
         const policy = mode === 'force_switch' ? 'force_switch' : exchange.session_conflict_policy;
         const currentExternal = normalizeExternalUserId(userRef.current);
         if (currentExternal === expectedExternalUserId) {
+          setExternalJwt(null);
           await finalizeSuccess(exchange, expectedExternalUserId, userRef.current.id);
           return;
         }
 
         if (policy === 'deny_if_mismatch') {
+          setExternalJwt(null);
           setErrorState({
             title: 'Access denied',
             message: 'This launch code belongs to another account.',
@@ -354,6 +375,7 @@ function LaunchContent() {
         }
 
         if (policy === 'prompt_switch') {
+          setExternalJwt(null);
           setConflictState({
             emailHint: exchange.expected_user.email_hint ?? null,
           });
@@ -361,10 +383,7 @@ function LaunchContent() {
           return;
         }
 
-        await logout();
-        setLaunchJwt(exchange.jwt);
-        const switchedUser = await waitForCustomJwtLogin(expectedExternalUserId);
-        await finalizeSuccess(exchange, expectedExternalUserId, switchedUser.id);
+        await redirectToLogin(true);
       } catch (error: unknown) {
         setErrorState(toLaunchErrorState(error));
         setScreen('error');
@@ -379,9 +398,7 @@ function LaunchContent() {
       finalizeSuccess,
       logout,
       router,
-      setLaunchJwt,
       token,
-      waitForCustomJwtLogin,
     ]
   );
 
@@ -392,6 +409,16 @@ function LaunchContent() {
     deviceIdRef.current = readDeviceIdFromBrowser();
     void executeFlow('initial');
   }, [executeFlow, ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    if (!launchStartedRef.current) return;
+    if (!jwtAttemptedRef.current) return;
+    if (!authenticated) return;
+    if (flowLockRef.current) return;
+    setExternalJwt(null);
+    void executeFlow('retry');
+  }, [authenticated, executeFlow, ready]);
 
   const handleBackToGame = useCallback(() => {
     if (typeof window !== 'undefined' && window.history.length > 1) {
@@ -459,7 +486,7 @@ function LaunchContent() {
                 disabled={busy}
                 className="interactive-fx no-shimmer mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-transparent bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:bg-white/30"
               >
-                {busy ? 'Switching...' : 'Switch account'}
+                {busy ? 'Continuing...' : 'Sign in with another account'}
               </button>
               <button
                 type="button"
@@ -467,6 +494,33 @@ function LaunchContent() {
                 className="interactive-fx no-shimmer mt-3 inline-flex w-full items-center justify-center rounded-2xl border border-white/20 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.07]"
               >
                 Cancel
+              </button>
+            </>
+          ) : null}
+
+          {screen === 'sign_in_required' ? (
+            <>
+              <h1 className="mt-3 text-2xl font-semibold leading-tight text-white">Sign in required</h1>
+              <p className="mt-2 text-sm text-gray-400">
+                Continue by signing in with the account tied to this launch link.
+                {signInRequiredState?.emailHint
+                  ? ` Expected account: ${signInRequiredState.emailHint}.`
+                  : ''}
+              </p>
+              <button
+                type="button"
+                onClick={() => void executeFlow('force_switch')}
+                disabled={busy}
+                className="interactive-fx no-shimmer mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-transparent bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:bg-white/30"
+              >
+                {busy ? 'Continuing...' : 'Go to sign in'}
+              </button>
+              <button
+                type="button"
+                onClick={handleBackToGame}
+                className="interactive-fx no-shimmer mt-3 inline-flex w-full items-center justify-center rounded-2xl border border-white/20 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.07]"
+              >
+                Back to game
               </button>
             </>
           ) : null}

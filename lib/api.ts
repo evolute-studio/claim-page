@@ -55,7 +55,7 @@ type WalletExchangeCodeErrorPayload = {
 
 export type WalletExchangeCodeSuccess = {
   auth_type: 'custom_jwt' | string;
-  jwt: string;
+  jwt?: string;
   expires_in_sec: number;
   expected_user: {
     external_user_id: string;

@@ -1,10 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { useLoginWithOAuth, usePrivy } from '@privy-io/react-auth';
 import { EmailLoginSheet } from '@/components/auth/EmailLoginSheet';
+
+function sanitizeReturnTo(value: string | null): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('/')) return null;
+  if (trimmed.startsWith('//')) return null;
+  return trimmed;
+}
 
 function GoogleIcon() {
   return (
@@ -55,6 +63,7 @@ function EvoluteTopLogo() {
 
 export default function Home() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { ready, authenticated } = usePrivy();
   const { initOAuth, loading: oauthLoginLoading } = useLoginWithOAuth();
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
@@ -62,8 +71,9 @@ export default function Home() {
 
   useEffect(() => {
     if (!ready || !authenticated) return;
-    router.replace('/app');
-  }, [ready, authenticated, router]);
+    const returnTo = sanitizeReturnTo(searchParams.get('returnTo'));
+    router.replace(returnTo ?? '/app');
+  }, [ready, authenticated, router, searchParams]);
 
   const handleGoogleLogin = async () => {
     setOauthLoginError(null);
