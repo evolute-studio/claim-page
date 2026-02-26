@@ -109,40 +109,40 @@ function toLaunchErrorState(error: unknown): LaunchErrorState {
   if (error instanceof WalletApiError) {
     switch (error.code) {
       case 'CODE_NOT_FOUND':
-        return { title: 'Ссылка не найдена', message: 'Код запуска не найден.', code: error.code };
+        return { title: 'Link not found', message: 'Launch code was not found.', code: error.code };
       case 'CODE_EXPIRED':
-        return { title: 'Ссылка истекла', message: 'Код запуска уже истёк.', code: error.code };
+        return { title: 'Link expired', message: 'Launch code has expired.', code: error.code };
       case 'CODE_ALREADY_USED':
-        return { title: 'Ссылка использована', message: 'Код запуска уже использован.', code: error.code };
+        return { title: 'Link already used', message: 'Launch code has already been used.', code: error.code };
       case 'DEVICE_MISMATCH':
-        return { title: 'Другое устройство', message: 'Откройте кошелёк на исходном устройстве.', code: error.code };
+        return { title: 'Different device', message: 'Open the wallet on the original device.', code: error.code };
       case 'PAYOUT_TOKEN_REQUIRED':
-        return { title: 'Нужен payout token', message: 'Для этого запуска требуется token.', code: error.code };
+        return { title: 'Payout token required', message: 'This launch flow requires a token.', code: error.code };
       case 'PAYOUT_TOKEN_INVALID':
-        return { title: 'Некорректный token', message: 'Передан невалидный payout token.', code: error.code };
+        return { title: 'Invalid token', message: 'Provided payout token is invalid.', code: error.code };
       case 'PRIVY_AUTH_NOT_CONFIGURED':
         return {
-          title: 'Вход временно недоступен',
-          message: 'Privy custom auth не настроен на сервере.',
+          title: 'Sign-in temporarily unavailable',
+          message: 'Privy custom auth is not configured on the server.',
           code: error.code,
         };
       case 'RATE_LIMITED':
-        return { title: 'Слишком много попыток', message: 'Подождите немного и попробуйте снова.', code: error.code };
+        return { title: 'Too many attempts', message: 'Please wait and try again.', code: error.code };
       case 'VALIDATION_ERROR':
-        return { title: 'Ошибка запроса', message: 'Проверьте параметры запуска.', code: error.code };
+        return { title: 'Invalid request', message: 'Check launch parameters.', code: error.code };
       case 'TIMEOUT':
-        return { title: 'Превышено время ожидания', message: error.message, code: error.code };
+        return { title: 'Request timed out', message: error.message, code: error.code };
       case 'NETWORK_ERROR':
-        return { title: 'Нет соединения', message: error.message, code: error.code };
+        return { title: 'No connection', message: error.message, code: error.code };
       case 'INTERNAL_ERROR':
       default:
-        return { title: 'Внутренняя ошибка', message: error.message, code: error.code };
+        return { title: 'Internal error', message: error.message, code: error.code };
     }
   }
   if (error instanceof Error) {
-    return { title: 'Ошибка запуска', message: error.message };
+    return { title: 'Launch error', message: error.message };
   }
-  return { title: 'Ошибка запуска', message: 'Что-то пошло не так. Попробуйте снова.' };
+  return { title: 'Launch error', message: 'Something went wrong. Please try again.' };
 }
 
 function buildAppDestination(exchange: WalletExchangeCodeSuccess): string {
@@ -231,7 +231,7 @@ function LaunchContent() {
     }
 
     throw new WalletApiError(
-      'Не удалось завершить вход по launch ссылке. Попробуйте снова.',
+      'Could not complete sign-in from launch link. Please try again.',
       'INTERNAL_ERROR'
     );
   }, []);
@@ -290,7 +290,7 @@ function LaunchContent() {
 
         const expectedExternalUserId = exchange.expected_user?.external_user_id?.trim();
         if (!expectedExternalUserId) {
-          throw new WalletApiError('Некорректный ответ launch API.', 'INTERNAL_ERROR');
+          throw new WalletApiError('Invalid launch API response.', 'INTERNAL_ERROR');
         }
 
         if (!authenticatedRef.current || !userRef.current) {
@@ -309,8 +309,8 @@ function LaunchContent() {
 
         if (policy === 'deny_if_mismatch') {
           setErrorState({
-            title: 'Доступ запрещён',
-            message: 'Этот launch-код принадлежит другому аккаунту.',
+            title: 'Access denied',
+            message: 'This launch code belongs to another account.',
           });
           setScreen('error');
           return;
@@ -369,9 +369,9 @@ function LaunchContent() {
 
           {screen === 'loading' ? (
             <>
-              <h1 className="mt-3 text-2xl font-semibold leading-tight text-white">Запускаем кошелёк…</h1>
+              <h1 className="mt-3 text-2xl font-semibold leading-tight text-white">Launching wallet...</h1>
               <p className="mt-2 text-sm text-gray-400">
-                Проверяем сессию и выполняем безопасный вход.
+                Checking session and completing secure sign-in.
               </p>
               <div className="mt-5 inline-flex items-center justify-center">
                 <LoadingSpinner size="lg" />
@@ -382,30 +382,30 @@ function LaunchContent() {
           {screen === 'open_from_game' ? (
             <>
               <h1 className="mt-3 text-2xl font-semibold leading-tight text-white">
-                Откройте кошелёк из игры
+                Open wallet from game
               </h1>
               <p className="mt-2 text-sm text-gray-400">
-                Launch-код не найден. Перейдите по ссылке из игрового клиента.
+                Launch code is missing. Open this link from the game client.
               </p>
               <button
                 type="button"
                 onClick={handleBackToGame}
                 className="interactive-fx no-shimmer mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-transparent bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-white/90"
               >
-                Вернуться в игру
+                Back to game
               </button>
             </>
           ) : null}
 
           {screen === 'session_conflict' ? (
             <>
-              <h1 className="mt-3 text-2xl font-semibold leading-tight text-white">Конфликт сессии</h1>
+              <h1 className="mt-3 text-2xl font-semibold leading-tight text-white">Session conflict</h1>
               <p className="mt-2 text-sm text-gray-400">
-                В этом браузере открыт другой аккаунт.
-                {conflictState?.emailHint ? ` Ожидаемый аккаунт: ${conflictState.emailHint}.` : ''}
+                A different account is currently active in this browser.
+                {conflictState?.emailHint ? ` Expected account: ${conflictState.emailHint}.` : ''}
               </p>
               <p className="mt-2 text-xs text-gray-500">
-                Текущий пользователь: {currentExternalUserId ?? 'не определён'}
+                Current user: {currentExternalUserId ?? 'unknown'}
               </p>
               <button
                 type="button"
@@ -413,14 +413,14 @@ function LaunchContent() {
                 disabled={busy}
                 className="interactive-fx no-shimmer mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-transparent bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:bg-white/30"
               >
-                {busy ? 'Переключение…' : 'Переключить аккаунт'}
+                {busy ? 'Switching...' : 'Switch account'}
               </button>
               <button
                 type="button"
                 onClick={() => setScreen('open_from_game')}
                 className="interactive-fx no-shimmer mt-3 inline-flex w-full items-center justify-center rounded-2xl border border-white/20 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.07]"
               >
-                Отмена
+                Cancel
               </button>
             </>
           ) : null}
@@ -428,11 +428,11 @@ function LaunchContent() {
           {screen === 'error' ? (
             <>
               <h1 className="mt-3 text-2xl font-semibold leading-tight text-white">
-                {errorState?.title ?? 'Ошибка запуска'}
+                {errorState?.title ?? 'Launch error'}
               </h1>
               <p className="mt-2 text-sm text-gray-400">{errorState?.message}</p>
               {errorState?.code ? (
-                <p className="mt-2 text-xs text-gray-500">Код ошибки: {errorState.code}</p>
+                <p className="mt-2 text-xs text-gray-500">Error code: {errorState.code}</p>
               ) : null}
               <button
                 type="button"
@@ -440,14 +440,14 @@ function LaunchContent() {
                 disabled={busy}
                 className="interactive-fx no-shimmer mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-transparent bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:bg-white/30"
               >
-                {busy ? 'Пробуем снова…' : 'Попробовать снова'}
+                {busy ? 'Retrying...' : 'Try again'}
               </button>
               <button
                 type="button"
                 onClick={handleBackToGame}
                 className="interactive-fx no-shimmer mt-3 inline-flex w-full items-center justify-center rounded-2xl border border-white/20 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.07]"
               >
-                Вернуться в игру
+                Back to game
               </button>
             </>
           ) : null}

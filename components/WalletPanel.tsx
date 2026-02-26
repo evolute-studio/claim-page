@@ -935,7 +935,7 @@ export function WalletPanel({
         const payMinor = parsedInputAmount;
         const requiredPay = BigInt(quote.total_burn_usdc_minor);
         if (!payMinor || payMinor < requiredPay) {
-          setFormError('Entered pay amount is ниже текущих комиссий. Увеличьте сумму.');
+          setFormError('Entered pay amount is below current fees. Increase the amount.');
           return;
         }
       }
@@ -1112,7 +1112,7 @@ export function WalletPanel({
         const payMinor = parsedInputAmount;
         const requiredPay = BigInt(quote.total_burn_usdc_minor);
         if (!payMinor || payMinor < requiredPay) {
-          setFormError('Entered pay amount is ниже текущих комиссий. Увеличьте сумму.');
+          setFormError('Entered pay amount is below current fees. Increase the amount.');
           return;
         }
       }
