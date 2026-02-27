@@ -50,6 +50,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
   const { wallets } = useWallets();
   const walletAddress = wallets[0]?.address;
   const expectedPrivyUserId = user?.id ?? null;
+  const isSessionReady = Boolean(expectedPrivyUserId);
 
   const [payouts, setPayouts] = useState<PayoutPreview[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -70,6 +71,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
   }, [expectedPrivyUserId, identityToken]);
 
   const loadPayouts = useCallback(async (mode: 'initial' | 'background' = 'background') => {
+    if (!isSessionReady) return;
     if (mode === 'initial') {
       setLoading(true);
       setError(null);
@@ -99,9 +101,10 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
         setRefreshing(false);
       }
     }
-  }, [focusToken, getAuthToken]);
+  }, [focusToken, getAuthToken, isSessionReady]);
 
   const loadMore = useCallback(async () => {
+    if (!isSessionReady) return;
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     setError(null);
@@ -116,11 +119,12 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
     } finally {
       setLoadingMore(false);
     }
-  }, [getAuthToken, loadingMore, nextCursor]);
+  }, [getAuthToken, isSessionReady, loadingMore, nextCursor]);
 
   useEffect(() => {
+    if (!isSessionReady) return;
     loadPayouts('initial');
-  }, [loadPayouts]);
+  }, [isSessionReady, loadPayouts]);
 
   useEffect(() => {
     if (loading || claimingId) return;
@@ -151,6 +155,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
   }, [activeFilter, payouts, focusToken]);
 
   const handleClaim = async (item: PayoutPreview) => {
+    if (!isSessionReady) return;
     if (!walletAddress) return;
     const payoutId = item.payout_id ?? item.id;
     if (!item.claim_token && !payoutId) return;

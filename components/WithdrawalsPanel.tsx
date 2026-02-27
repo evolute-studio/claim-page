@@ -64,6 +64,7 @@ export function WithdrawalsPanel() {
   const config = useMemo(() => getCctpConfig(), []);
   const destinations = useMemo(() => getDestinationChains(config.sourceChain), [config.sourceChain]);
   const expectedPrivyUserId = user?.id ?? null;
+  const isSessionReady = Boolean(expectedPrivyUserId);
 
   const [withdrawals, setWithdrawals] = useState<WithdrawalListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,6 +82,7 @@ export function WithdrawalsPanel() {
   }, [expectedPrivyUserId, identityToken]);
 
   const loadWithdrawals = useCallback(async (mode: 'initial' | 'background' = 'background') => {
+    if (!isSessionReady) return;
     if (mode === 'initial') {
       setLoading(true);
       setError(null);
@@ -103,11 +105,12 @@ export function WithdrawalsPanel() {
         setRefreshing(false);
       }
     }
-  }, [getAuthToken]);
+  }, [getAuthToken, isSessionReady]);
 
   useEffect(() => {
+    if (!isSessionReady) return;
     loadWithdrawals('initial');
-  }, [loadWithdrawals]);
+  }, [isSessionReady, loadWithdrawals]);
 
   const visibleWithdrawals = useMemo(() => {
     if (activeFilter === 'ALL') return withdrawals;

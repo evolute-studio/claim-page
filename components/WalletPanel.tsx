@@ -357,6 +357,7 @@ export function WalletPanel({
   const { wallets } = useWallets();
   const { identityToken } = useIdentityToken();
   const { user } = usePrivy();
+  const currentPrivyUserId = user?.id?.trim() ?? '';
   const { sendTransaction } = useSendTransaction();
   const config = useMemo(() => getCctpConfig(), []);
   const publicClient = useMemo(() => {
@@ -378,9 +379,13 @@ export function WalletPanel({
   }, [user]);
 
   const getAuthToken = useCallback(async () => {
+    const expectedPrivyUserId = privyUserIdRef.current?.trim() ?? '';
+    if (!expectedPrivyUserId) {
+      throw new Error('Identity session is not ready. Please wait.');
+    }
     return resolvePrivyIdentityToken({
       cachedToken: identityTokenRef.current,
-      expectedPrivyUserId: privyUserIdRef.current,
+      expectedPrivyUserId,
       fetchFreshToken: () => getIdentityToken(),
     });
   }, []);
@@ -1464,13 +1469,14 @@ export function WalletPanel({
   );
 
   useEffect(() => {
+    if (!currentPrivyUserId) return;
     if (withdrawOpen) return;
     void loadClaimablePayouts(didInitialClaimableLoadRef.current ? 'background' : 'initial');
     const timerId = window.setInterval(() => {
       void loadClaimablePayouts('background');
     }, 20_000);
     return () => window.clearInterval(timerId);
-  }, [loadClaimablePayouts, withdrawOpen]);
+  }, [currentPrivyUserId, loadClaimablePayouts, withdrawOpen]);
 
   useEffect(() => {
     return () => {

@@ -88,6 +88,7 @@ export function HistoryPanel({
 }) {
   const { identityToken } = useIdentityToken();
   const { user } = usePrivy();
+  const currentPrivyUserId = user?.id?.trim() ?? '';
   const config = useMemo(() => getCctpConfig(), []);
   const destinations = useMemo(() => getDestinationChains(config.sourceChain), [config.sourceChain]);
   const [view, setView] = useState<HistoryView>('incomes');
@@ -141,6 +142,7 @@ export function HistoryPanel({
 
   const loadHistory = useCallback(
     async (mode: 'initial' | 'background' = 'background', options: LoadHistoryOptions = {}) => {
+      if (!privyUserIdRef.current?.trim()) return;
       const showRefreshIndicator = options.showRefreshIndicator ?? false;
       if (mode === 'initial') {
         setLoading(true);
@@ -177,28 +179,31 @@ export function HistoryPanel({
   );
 
   useEffect(() => {
+    if (!currentPrivyUserId) return;
     if (didInitialLoadRef.current) return;
     didInitialLoadRef.current = true;
     void loadHistory('initial');
-  }, [loadHistory]);
+  }, [currentPrivyUserId, loadHistory]);
 
   useEffect(() => {
+    if (!currentPrivyUserId) return;
     if (!focusToken && !focusPayoutRef && !focusWithdrawalRef) return;
     if (loading) return;
     const signature = `${focusToken ?? ''}|${focusPayoutRef ?? ''}|${focusWithdrawalRef ?? ''}`;
     if (lastFocusRefreshSignatureRef.current === signature) return;
     lastFocusRefreshSignatureRef.current = signature;
     void loadHistory('background');
-  }, [focusPayoutRef, focusToken, focusWithdrawalRef, loadHistory, loading]);
+  }, [currentPrivyUserId, focusPayoutRef, focusToken, focusWithdrawalRef, loadHistory, loading]);
 
   useEffect(() => {
+    if (!currentPrivyUserId) return;
     if (loading) return;
     const timerId = window.setInterval(() => {
       void loadHistory('background');
     }, 12_000);
 
     return () => window.clearInterval(timerId);
-  }, [loading, loadHistory]);
+  }, [currentPrivyUserId, loading, loadHistory]);
 
   useLayoutEffect(() => {
     const pending = pendingScrollRestoreRef.current;
