@@ -5,6 +5,7 @@ import type { FormEvent } from 'react';
 import {
   getIdentityToken,
   useIdentityToken,
+  usePrivy,
   useSendTransaction,
   useWallets,
 } from '@privy-io/react-auth';
@@ -29,6 +30,7 @@ import {
 } from '@/lib/api';
 import { getCctpConfig, getDestinationChains, getDestinationConfig } from '@/lib/cctp';
 import { getExplorerTxUrl } from '@/lib/explorer';
+import { resolvePrivyIdentityToken } from '@/lib/identityToken';
 import { WithdrawStepAmount } from '@/components/withdraw/WithdrawStepAmount';
 import { WithdrawStepNetwork } from '@/components/withdraw/WithdrawStepNetwork';
 import { WithdrawStepReview } from '@/components/withdraw/WithdrawStepReview';
@@ -354,6 +356,7 @@ export function WalletPanel({
 }) {
   const { wallets } = useWallets();
   const { identityToken } = useIdentityToken();
+  const { user } = usePrivy();
   const { sendTransaction } = useSendTransaction();
   const config = useMemo(() => getCctpConfig(), []);
   const publicClient = useMemo(() => {
@@ -363,25 +366,23 @@ export function WalletPanel({
     });
   }, [config.sourceChain]);
   const identityTokenRef = useRef<string | null>(identityToken ?? null);
+  const privyUserIdRef = useRef<string | null>(user?.id ?? null);
   const didInitialClaimableLoadRef = useRef(false);
 
   useEffect(() => {
     identityTokenRef.current = identityToken ?? null;
   }, [identityToken]);
 
+  useEffect(() => {
+    privyUserIdRef.current = user?.id ?? null;
+  }, [user]);
+
   const getAuthToken = useCallback(async () => {
-    const cachedToken = identityTokenRef.current?.trim() ?? '';
-    if (cachedToken) return cachedToken;
-
-    try {
-      const freshToken = await getIdentityToken();
-      const normalizedFreshToken = freshToken?.trim() ?? '';
-      if (normalizedFreshToken) return normalizedFreshToken;
-    } catch {
-      // Fall through to unified error message.
-    }
-
-    throw new Error('Missing identity token. Please re-login.');
+    return resolvePrivyIdentityToken({
+      cachedToken: identityTokenRef.current,
+      expectedPrivyUserId: privyUserIdRef.current,
+      fetchFreshToken: () => getIdentityToken(),
+    });
   }, []);
 
   const [amountMode] = useState<AmountMode>('pay');

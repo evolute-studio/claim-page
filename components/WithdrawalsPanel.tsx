@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { getIdentityToken, useIdentityToken } from '@privy-io/react-auth';
+import { getIdentityToken, useIdentityToken, usePrivy } from '@privy-io/react-auth';
 import { getMyWithdrawals } from '@/lib/api';
 import { getCctpConfig, getDestinationChains } from '@/lib/cctp';
 import { truncateAddress } from '@/lib/format';
+import { resolvePrivyIdentityToken } from '@/lib/identityToken';
 import type { DestinationChain, WithdrawalListItem, WithdrawalStatus } from '@/types/withdrawal';
 import { WithdrawalStatusBadge } from '@/components/WithdrawalStatusBadge';
 
@@ -59,8 +60,10 @@ function VerticalDotsIcon() {
 
 export function WithdrawalsPanel() {
   const { identityToken } = useIdentityToken();
+  const { user } = usePrivy();
   const config = useMemo(() => getCctpConfig(), []);
   const destinations = useMemo(() => getDestinationChains(config.sourceChain), [config.sourceChain]);
+  const expectedPrivyUserId = user?.id ?? null;
 
   const [withdrawals, setWithdrawals] = useState<WithdrawalListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,19 +73,12 @@ export function WithdrawalsPanel() {
   const [activeFilter, setActiveFilter] = useState<'ALL' | WithdrawalStatus>('ALL');
 
   const getAuthToken = useCallback(async () => {
-    const cachedToken = identityToken?.trim() ?? '';
-    if (cachedToken) return cachedToken;
-
-    try {
-      const freshToken = await getIdentityToken();
-      const normalizedFreshToken = freshToken?.trim() ?? '';
-      if (normalizedFreshToken) return normalizedFreshToken;
-    } catch {
-      // Fall through to unified error message.
-    }
-
-    throw new Error('Missing identity token. Please re-login.');
-  }, [identityToken]);
+    return resolvePrivyIdentityToken({
+      cachedToken: identityToken,
+      expectedPrivyUserId,
+      fetchFreshToken: () => getIdentityToken(),
+    });
+  }, [expectedPrivyUserId, identityToken]);
 
   const loadWithdrawals = useCallback(async (mode: 'initial' | 'background' = 'background') => {
     if (mode === 'initial') {

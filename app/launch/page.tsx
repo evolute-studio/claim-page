@@ -12,6 +12,7 @@ import {
   type WalletExchangeCodeSuccess,
   type WalletExchangeErrorCode,
 } from '@/lib/api';
+import { resolvePrivyIdentityToken } from '@/lib/identityToken';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 
 type LaunchScreen = 'loading' | 'open_from_game' | 'session_conflict' | 'error';
@@ -244,9 +245,16 @@ function LaunchContent() {
 
   const finalizeSuccess = useCallback(
     async (exchange: WalletExchangeCodeSuccess, externalUserId: string, privyUserId: string) => {
-      const identityToken = await getIdentityToken();
-      if (!identityToken) {
-        throw new WalletApiError('Missing identity token after sign-in.', 'INTERNAL_ERROR');
+      let identityToken: string;
+      try {
+        identityToken = await resolvePrivyIdentityToken({
+          expectedPrivyUserId: privyUserId,
+          fetchFreshToken: () => getIdentityToken(),
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Missing identity token after sign-in.';
+        throw new WalletApiError(message, 'INTERNAL_ERROR');
       }
       await markWalletSessionLinked(
         {

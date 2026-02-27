@@ -1,9 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { getIdentityToken, useIdentityToken, useWallets } from '@privy-io/react-auth';
+import { getIdentityToken, useIdentityToken, usePrivy, useWallets } from '@privy-io/react-auth';
 import { confirmClaim, confirmClaimByPayoutId, getMyPayouts } from '@/lib/api';
 import { getExplorerTxUrl } from '@/lib/explorer';
+import { resolvePrivyIdentityToken } from '@/lib/identityToken';
 import { PayoutPreview, PayoutStatus } from '@/types/payout';
 import { StatusBadge } from '@/components/StatusBadge';
 import { CoinIcon } from '@/components/CoinIcon';
@@ -45,8 +46,10 @@ function openExplorerUrl(chain: string, txHash: string) {
 
 export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
   const { identityToken } = useIdentityToken();
+  const { user } = usePrivy();
   const { wallets } = useWallets();
   const walletAddress = wallets[0]?.address;
+  const expectedPrivyUserId = user?.id ?? null;
 
   const [payouts, setPayouts] = useState<PayoutPreview[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -59,19 +62,12 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
   const [selectedPayout, setSelectedPayout] = useState<PayoutPreview | null>(null);
 
   const getAuthToken = useCallback(async () => {
-    const cachedToken = identityToken?.trim() ?? '';
-    if (cachedToken) return cachedToken;
-
-    try {
-      const freshToken = await getIdentityToken();
-      const normalizedFreshToken = freshToken?.trim() ?? '';
-      if (normalizedFreshToken) return normalizedFreshToken;
-    } catch {
-      // Fall through to unified error message.
-    }
-
-    throw new Error('Missing identity token. Please re-login.');
-  }, [identityToken]);
+    return resolvePrivyIdentityToken({
+      cachedToken: identityToken,
+      expectedPrivyUserId,
+      fetchFreshToken: () => getIdentityToken(),
+    });
+  }, [expectedPrivyUserId, identityToken]);
 
   const loadPayouts = useCallback(async (mode: 'initial' | 'background' = 'background') => {
     if (mode === 'initial') {

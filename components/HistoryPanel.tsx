@@ -1,11 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { getIdentityToken, useIdentityToken } from '@privy-io/react-auth';
+import { getIdentityToken, useIdentityToken, usePrivy } from '@privy-io/react-auth';
 import { ChevronDown, Inbox, RotateCw } from 'lucide-react';
 import { getMyPayouts, getMyWithdrawals } from '@/lib/api';
 import { getCctpConfig, getDestinationChains } from '@/lib/cctp';
 import { getExplorerTxUrl } from '@/lib/explorer';
+import { resolvePrivyIdentityToken } from '@/lib/identityToken';
 import { StatusBadge } from '@/components/StatusBadge';
 import { WithdrawalStatusBadge } from '@/components/WithdrawalStatusBadge';
 import { truncateAddress } from '@/lib/format';
@@ -86,6 +87,7 @@ export function HistoryPanel({
   isActive?: boolean;
 }) {
   const { identityToken } = useIdentityToken();
+  const { user } = usePrivy();
   const config = useMemo(() => getCctpConfig(), []);
   const destinations = useMemo(() => getDestinationChains(config.sourceChain), [config.sourceChain]);
   const [view, setView] = useState<HistoryView>('incomes');
@@ -108,6 +110,7 @@ export function HistoryPanel({
   const incomesScrollArmedRef = useRef(false);
   const outcomesScrollArmedRef = useRef(false);
   const identityTokenRef = useRef<string | null>(identityToken ?? null);
+  const privyUserIdRef = useRef<string | null>(user?.id ?? null);
   const didInitialLoadRef = useRef(false);
   const incomesListRef = useRef<HTMLDivElement | null>(null);
   const outcomesListRef = useRef<HTMLDivElement | null>(null);
@@ -124,19 +127,16 @@ export function HistoryPanel({
     identityTokenRef.current = identityToken ?? null;
   }, [identityToken]);
 
+  useEffect(() => {
+    privyUserIdRef.current = user?.id ?? null;
+  }, [user]);
+
   const getAuthToken = useCallback(async () => {
-    const cachedToken = identityTokenRef.current?.trim() ?? '';
-    if (cachedToken) return cachedToken;
-
-    try {
-      const freshToken = await getIdentityToken();
-      const normalizedFreshToken = freshToken?.trim() ?? '';
-      if (normalizedFreshToken) return normalizedFreshToken;
-    } catch {
-      // Fall through to unified error message.
-    }
-
-    throw new Error('Missing identity token. Please re-login.');
+    return resolvePrivyIdentityToken({
+      cachedToken: identityTokenRef.current,
+      expectedPrivyUserId: privyUserIdRef.current,
+      fetchFreshToken: () => getIdentityToken(),
+    });
   }, []);
 
   const loadHistory = useCallback(
