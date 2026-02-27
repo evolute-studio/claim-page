@@ -172,12 +172,16 @@ export function HistoryPanel({
           getMyPayouts(
             token,
             undefined,
-            debugEnabled
-              ? {
-                  debugTraceId: traceId,
-                  debugSource: 'HistoryPanel.loadHistory',
-                }
-              : undefined
+            {
+              statuses: 'ALL',
+              ...(debugEnabled
+                ? {
+                    debugTraceId: traceId,
+                    debugSource: 'HistoryPanel.loadHistory',
+                    debugExpectedSub: currentPrivyUserId || undefined,
+                  }
+                : {}),
+            }
           ),
           getMyWithdrawals(token),
         ]);

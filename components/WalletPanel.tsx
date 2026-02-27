@@ -1405,12 +1405,16 @@ export function WalletPanel({
         const response = await getMyPayouts(
           token,
           undefined,
-          debugEnabled
-            ? {
-                debugTraceId: traceId,
-                debugSource: 'WalletPanel.loadClaimablePayouts',
-              }
-            : undefined
+          {
+            statuses: ['CREATED', 'PENDING_APPROVAL'],
+            ...(debugEnabled
+              ? {
+                  debugTraceId: traceId,
+                  debugSource: 'WalletPanel.loadClaimablePayouts',
+                  debugExpectedSub: currentPrivyUserId || undefined,
+                }
+              : {}),
+          }
         );
         const claimable = response.payouts
           .filter((item) => item.status !== 'EXPIRED')

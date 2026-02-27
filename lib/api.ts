@@ -582,12 +582,26 @@ export async function getMyPayouts(
   privyIdentityToken: string,
   cursor?: string,
   options?: {
+    statuses?: PayoutStatus[] | 'ALL';
     debugTraceId?: string;
     debugSource?: string;
+    debugExpectedSub?: string;
   }
 ): Promise<PayoutListResponse> {
   const DEFAULT_PAYOUT_PAGE_LIMIT = 50;
   const DEFAULT_PAYOUT_STATUSES: PayoutStatus[] = ['CREATED', 'PAID'];
+  const isPayoutStatus = (value: unknown): value is PayoutStatus => {
+    return (
+      value === 'CREATED' ||
+      value === 'PENDING_EMAIL' ||
+      value === 'PENDING_APPROVAL' ||
+      value === 'PAYING' ||
+      value === 'PAID' ||
+      value === 'FAILED' ||
+      value === 'EXPIRED' ||
+      value === 'CANCELLED'
+    );
+  };
   const parseOffsetCursor = (rawCursor: string): number | null => {
     const match = rawCursor.match(/^offset:(\d+)$/);
     if (!match?.[1]) return null;
@@ -605,12 +619,20 @@ export async function getMyPayouts(
 
   const normalizedCursor = cursor?.trim() ?? '';
   const offsetCursor = normalizedCursor ? parseOffsetCursor(normalizedCursor) : null;
+  const requestedStatuses =
+    options?.statuses === 'ALL'
+      ? null
+      : Array.isArray(options?.statuses)
+        ? options.statuses.filter((status): status is PayoutStatus => isPayoutStatus(status))
+        : DEFAULT_PAYOUT_STATUSES;
   const apiBase = getApiBaseOrThrow();
   const query = new URLSearchParams();
   if (normalizedCursor && offsetCursor === null) {
     query.set('cursor', normalizedCursor);
   } else {
-    query.set('status', DEFAULT_PAYOUT_STATUSES.join(','));
+    if (requestedStatuses && requestedStatuses.length > 0) {
+      query.set('status', requestedStatuses.join(','));
+    }
     query.set('limit', String(DEFAULT_PAYOUT_PAGE_LIMIT));
     query.set('offset', String(offsetCursor ?? 0));
   }
@@ -629,15 +651,24 @@ export async function getMyPayouts(
       source: debugSource || null,
       token_sub: readJwtSub(privyIdentityToken),
       token_fp: tokenFingerprint(privyIdentityToken),
+      requested_statuses: requestedStatuses ?? 'ALL',
       url,
     });
   }
 
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${privyIdentityToken}`,
-    },
-  });
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${privyIdentityToken}`,
+  };
+  if (debugTraceId || debugSource) {
+    headers['X-Auth-Debug-Trace'] = debugTraceId || '-';
+    headers['X-Auth-Debug-Source'] = debugSource || '-';
+    headers['X-Auth-Debug-Token-Sub'] = readJwtSub(privyIdentityToken) ?? '-';
+    headers['X-Auth-Debug-Token-Fp'] = tokenFingerprint(privyIdentityToken);
+    const expectedSub = options?.debugExpectedSub?.trim() ?? '';
+    headers['X-Auth-Debug-Expected-Sub'] = expectedSub || '-';
+  }
+
+  const res = await fetch(url, { headers });
 
   const data = await res.json().catch(() => ({}));
   if (debugTraceId || debugSource) {

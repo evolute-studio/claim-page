@@ -96,12 +96,16 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
       const data = await getMyPayouts(
         token,
         undefined,
-        debugEnabled
-          ? {
-              debugTraceId: traceId,
-              debugSource: 'PayoutsPanel.loadPayouts',
-            }
-          : undefined
+        {
+          statuses: 'ALL',
+          ...(debugEnabled
+            ? {
+                debugTraceId: traceId,
+                debugSource: 'PayoutsPanel.loadPayouts',
+                debugExpectedSub: expectedPrivyUserId ?? undefined,
+              }
+            : {}),
+        }
       );
       setPayouts(data.payouts);
       setNextCursor(data.next_cursor ?? null);
@@ -146,12 +150,16 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
       const data = await getMyPayouts(
         token,
         nextCursor,
-        debugEnabled
-          ? {
-              debugTraceId: traceId,
-              debugSource: 'PayoutsPanel.loadMore',
-            }
-          : undefined
+        {
+          statuses: 'ALL',
+          ...(debugEnabled
+            ? {
+                debugTraceId: traceId,
+                debugSource: 'PayoutsPanel.loadMore',
+                debugExpectedSub: expectedPrivyUserId ?? undefined,
+              }
+            : {}),
+        }
       );
       setPayouts((current) => [...current, ...data.payouts]);
       setNextCursor(data.next_cursor ?? null);
