@@ -370,17 +370,18 @@ export function WalletPanel({
   }, [identityToken]);
 
   const getAuthToken = useCallback(async () => {
-    let freshToken: string | null = null;
+    const cachedToken = identityTokenRef.current?.trim() ?? '';
+    if (cachedToken) return cachedToken;
+
     try {
-      freshToken = await getIdentityToken();
+      const freshToken = await getIdentityToken();
+      const normalizedFreshToken = freshToken?.trim() ?? '';
+      if (normalizedFreshToken) return normalizedFreshToken;
     } catch {
-      freshToken = null;
+      // Fall through to unified error message.
     }
-    const token = freshToken ?? identityTokenRef.current;
-    if (!token) {
-      throw new Error('Missing identity token. Please re-login.');
-    }
-    return token;
+
+    throw new Error('Missing identity token. Please re-login.');
   }, []);
 
   const [amountMode] = useState<AmountMode>('pay');

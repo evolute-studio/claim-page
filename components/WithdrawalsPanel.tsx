@@ -70,17 +70,18 @@ export function WithdrawalsPanel() {
   const [activeFilter, setActiveFilter] = useState<'ALL' | WithdrawalStatus>('ALL');
 
   const getAuthToken = useCallback(async () => {
-    let freshToken: string | null = null;
+    const cachedToken = identityToken?.trim() ?? '';
+    if (cachedToken) return cachedToken;
+
     try {
-      freshToken = await getIdentityToken();
+      const freshToken = await getIdentityToken();
+      const normalizedFreshToken = freshToken?.trim() ?? '';
+      if (normalizedFreshToken) return normalizedFreshToken;
     } catch {
-      freshToken = null;
+      // Fall through to unified error message.
     }
-    const token = freshToken ?? identityToken;
-    if (!token) {
-      throw new Error('Missing identity token. Please re-login.');
-    }
-    return token;
+
+    throw new Error('Missing identity token. Please re-login.');
   }, [identityToken]);
 
   const loadWithdrawals = useCallback(async (mode: 'initial' | 'background' = 'background') => {
