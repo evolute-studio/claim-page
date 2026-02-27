@@ -656,19 +656,11 @@ export async function getMyPayouts(
     });
   }
 
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${privyIdentityToken}`,
-  };
-  if (debugTraceId || debugSource) {
-    headers['X-Auth-Debug-Trace'] = debugTraceId || '-';
-    headers['X-Auth-Debug-Source'] = debugSource || '-';
-    headers['X-Auth-Debug-Token-Sub'] = readJwtSub(privyIdentityToken) ?? '-';
-    headers['X-Auth-Debug-Token-Fp'] = tokenFingerprint(privyIdentityToken);
-    const expectedSub = options?.debugExpectedSub?.trim() ?? '';
-    headers['X-Auth-Debug-Expected-Sub'] = expectedSub || '-';
-  }
-
-  const res = await fetch(url, { headers });
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${privyIdentityToken}`,
+    },
+  });
 
   const data = await res.json().catch(() => ({}));
   if (debugTraceId || debugSource) {
