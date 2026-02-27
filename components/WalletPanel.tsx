@@ -30,7 +30,8 @@ import {
 } from '@/lib/api';
 import { getCctpConfig, getDestinationChains, getDestinationConfig } from '@/lib/cctp';
 import { getExplorerTxUrl } from '@/lib/explorer';
-import { resolvePrivyIdentityToken } from '@/lib/identityToken';
+import { authDebug, createAuthTraceId, isAuthDebugEnabled, tokenFingerprint } from '@/lib/authDebug';
+import { readJwtSub, resolvePrivyIdentityToken } from '@/lib/identityToken';
 import { WithdrawStepAmount } from '@/components/withdraw/WithdrawStepAmount';
 import { WithdrawStepNetwork } from '@/components/withdraw/WithdrawStepNetwork';
 import { WithdrawStepReview } from '@/components/withdraw/WithdrawStepReview';
@@ -387,6 +388,7 @@ export function WalletPanel({
       cachedToken: identityTokenRef.current,
       expectedPrivyUserId,
       fetchFreshToken: () => getIdentityToken(),
+      source: 'WalletPanel.getAuthToken',
     });
   }, []);
 
@@ -1390,7 +1392,26 @@ export function WalletPanel({
       setClaimablePayoutsError(null);
       try {
         const token = await getAuthToken();
-        const response = await getMyPayouts(token);
+        const traceId = createAuthTraceId('wallet-payouts');
+        const debugEnabled = isAuthDebugEnabled();
+        authDebug('payouts.request', {
+          source: 'WalletPanel.loadClaimablePayouts',
+          mode,
+          trace_id: traceId,
+          expected_privy_user_id: currentPrivyUserId || null,
+          token_sub: readJwtSub(token),
+          token_fp: tokenFingerprint(token),
+        });
+        const response = await getMyPayouts(
+          token,
+          undefined,
+          debugEnabled
+            ? {
+                debugTraceId: traceId,
+                debugSource: 'WalletPanel.loadClaimablePayouts',
+              }
+            : undefined
+        );
         const claimable = response.payouts
           .filter((item) => item.status !== 'EXPIRED')
           .sort((a, b) => {
@@ -1415,7 +1436,7 @@ export function WalletPanel({
         if (shouldShowLoading) setClaimablePayoutsLoading(false);
       }
     },
-    [claimablePayouts.length, getAuthToken]
+    [claimablePayouts.length, currentPrivyUserId, getAuthToken]
   );
 
   const handleClaimablePayoutClaim = useCallback(
@@ -1430,6 +1451,14 @@ export function WalletPanel({
       setClaimablePayoutsError(null);
       try {
         const token = await getAuthToken();
+        authDebug('claim.request', {
+          source: 'WalletPanel.handleClaimablePayoutClaim',
+          expected_privy_user_id: currentPrivyUserId || null,
+          token_sub: readJwtSub(token),
+          token_fp: tokenFingerprint(token),
+          payout_id: payoutId ?? null,
+          claim_token_present: Boolean(item.claim_token),
+        });
         if (item.claim_token) {
           try {
             const confirmResponse = await confirmClaim(item.claim_token, activeWalletAddress, token);
@@ -1465,7 +1494,7 @@ export function WalletPanel({
         setClaimingPayoutId(null);
       }
     },
-    [activeWalletAddress, getAuthToken, loadClaimablePayouts, onClaimedPayoutFocus]
+    [activeWalletAddress, currentPrivyUserId, getAuthToken, loadClaimablePayouts, onClaimedPayoutFocus]
   );
 
   useEffect(() => {

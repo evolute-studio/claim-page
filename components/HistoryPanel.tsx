@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { getIdentityToken, useIdentityToken, usePrivy } from '@privy-io/react-auth';
 import { ChevronDown, Inbox, RotateCw } from 'lucide-react';
+import { authDebug, createAuthTraceId, isAuthDebugEnabled, tokenFingerprint } from '@/lib/authDebug';
 import { getMyPayouts, getMyWithdrawals } from '@/lib/api';
 import { getCctpConfig, getDestinationChains } from '@/lib/cctp';
 import { getExplorerTxUrl } from '@/lib/explorer';
-import { resolvePrivyIdentityToken } from '@/lib/identityToken';
+import { readJwtSub, resolvePrivyIdentityToken } from '@/lib/identityToken';
 import { StatusBadge } from '@/components/StatusBadge';
 import { WithdrawalStatusBadge } from '@/components/WithdrawalStatusBadge';
 import { truncateAddress } from '@/lib/format';
@@ -137,6 +138,7 @@ export function HistoryPanel({
       cachedToken: identityTokenRef.current,
       expectedPrivyUserId: privyUserIdRef.current,
       fetchFreshToken: () => getIdentityToken(),
+      source: 'HistoryPanel.getAuthToken',
     });
   }, []);
 
@@ -156,8 +158,27 @@ export function HistoryPanel({
       }
       try {
         const token = await getAuthToken();
+        const traceId = createAuthTraceId('history-payouts');
+        const debugEnabled = isAuthDebugEnabled();
+        authDebug('payouts.request', {
+          source: 'HistoryPanel.loadHistory',
+          mode,
+          trace_id: traceId,
+          expected_privy_user_id: currentPrivyUserId || null,
+          token_sub: readJwtSub(token),
+          token_fp: tokenFingerprint(token),
+        });
         const [payoutData, withdrawalData] = await Promise.all([
-          getMyPayouts(token),
+          getMyPayouts(
+            token,
+            undefined,
+            debugEnabled
+              ? {
+                  debugTraceId: traceId,
+                  debugSource: 'HistoryPanel.loadHistory',
+                }
+              : undefined
+          ),
           getMyWithdrawals(token),
         ]);
         setPayouts(payoutData.payouts);
@@ -175,7 +196,7 @@ export function HistoryPanel({
         }
       }
     },
-    [getAuthToken]
+    [currentPrivyUserId, getAuthToken]
   );
 
   useEffect(() => {

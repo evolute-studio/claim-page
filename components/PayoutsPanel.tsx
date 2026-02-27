@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getIdentityToken, useIdentityToken, usePrivy, useWallets } from '@privy-io/react-auth';
 import { confirmClaim, confirmClaimByPayoutId, getMyPayouts } from '@/lib/api';
+import { authDebug, createAuthTraceId, isAuthDebugEnabled, tokenFingerprint } from '@/lib/authDebug';
 import { getExplorerTxUrl } from '@/lib/explorer';
-import { resolvePrivyIdentityToken } from '@/lib/identityToken';
+import { readJwtSub, resolvePrivyIdentityToken } from '@/lib/identityToken';
 import { PayoutPreview, PayoutStatus } from '@/types/payout';
 import { StatusBadge } from '@/components/StatusBadge';
 import { CoinIcon } from '@/components/CoinIcon';
@@ -67,6 +68,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
       cachedToken: identityToken,
       expectedPrivyUserId,
       fetchFreshToken: () => getIdentityToken(),
+      source: 'PayoutsPanel.getAuthToken',
     });
   }, [expectedPrivyUserId, identityToken]);
 
@@ -80,7 +82,27 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
     }
     try {
       const token = await getAuthToken();
-      const data = await getMyPayouts(token);
+      const traceId = createAuthTraceId('payouts');
+      const debugEnabled = isAuthDebugEnabled();
+      const tokenSub = readJwtSub(token);
+      authDebug('payouts.request', {
+        source: 'PayoutsPanel.loadPayouts',
+        mode,
+        trace_id: traceId,
+        expected_privy_user_id: expectedPrivyUserId,
+        token_sub: tokenSub,
+        token_fp: tokenFingerprint(token),
+      });
+      const data = await getMyPayouts(
+        token,
+        undefined,
+        debugEnabled
+          ? {
+              debugTraceId: traceId,
+              debugSource: 'PayoutsPanel.loadPayouts',
+            }
+          : undefined
+      );
       setPayouts(data.payouts);
       setNextCursor(data.next_cursor ?? null);
       setError(null);
@@ -101,7 +123,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
         setRefreshing(false);
       }
     }
-  }, [focusToken, getAuthToken, isSessionReady]);
+  }, [expectedPrivyUserId, focusToken, getAuthToken, isSessionReady]);
 
   const loadMore = useCallback(async () => {
     if (!isSessionReady) return;
@@ -110,7 +132,27 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
     setError(null);
     try {
       const token = await getAuthToken();
-      const data = await getMyPayouts(token, nextCursor);
+      const traceId = createAuthTraceId('payouts-more');
+      const debugEnabled = isAuthDebugEnabled();
+      authDebug('payouts.request', {
+        source: 'PayoutsPanel.loadMore',
+        mode: 'load_more',
+        trace_id: traceId,
+        expected_privy_user_id: expectedPrivyUserId,
+        token_sub: readJwtSub(token),
+        token_fp: tokenFingerprint(token),
+        cursor: nextCursor,
+      });
+      const data = await getMyPayouts(
+        token,
+        nextCursor,
+        debugEnabled
+          ? {
+              debugTraceId: traceId,
+              debugSource: 'PayoutsPanel.loadMore',
+            }
+          : undefined
+      );
       setPayouts((current) => [...current, ...data.payouts]);
       setNextCursor(data.next_cursor ?? null);
     } catch (requestError) {
@@ -119,7 +161,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
     } finally {
       setLoadingMore(false);
     }
-  }, [getAuthToken, isSessionReady, loadingMore, nextCursor]);
+  }, [expectedPrivyUserId, getAuthToken, isSessionReady, loadingMore, nextCursor]);
 
   useEffect(() => {
     if (!isSessionReady) return;
@@ -164,6 +206,14 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
     setError(null);
     try {
       const token = await getAuthToken();
+      authDebug('claim.request', {
+        source: 'PayoutsPanel.handleClaim',
+        expected_privy_user_id: expectedPrivyUserId,
+        token_sub: readJwtSub(token),
+        token_fp: tokenFingerprint(token),
+        payout_id: payoutId ?? null,
+        claim_token_present: Boolean(item.claim_token),
+      });
       if (item.claim_token) {
         try {
           await confirmClaim(item.claim_token, walletAddress, token);

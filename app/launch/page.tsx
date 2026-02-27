@@ -12,7 +12,8 @@ import {
   type WalletExchangeCodeSuccess,
   type WalletExchangeErrorCode,
 } from '@/lib/api';
-import { resolvePrivyIdentityToken } from '@/lib/identityToken';
+import { authDebug, tokenFingerprint } from '@/lib/authDebug';
+import { readJwtSub, resolvePrivyIdentityToken } from '@/lib/identityToken';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 
 type LaunchScreen = 'loading' | 'open_from_game' | 'session_conflict' | 'error';
@@ -250,6 +251,7 @@ function LaunchContent() {
         identityToken = await resolvePrivyIdentityToken({
           expectedPrivyUserId: privyUserId,
           fetchFreshToken: () => getIdentityToken(),
+          source: 'LaunchPage.finalizeSuccess',
         });
       } catch (error) {
         const message =
@@ -265,6 +267,12 @@ function LaunchContent() {
         identityToken,
         { deviceId: deviceIdRef.current }
       );
+      authDebug('launch.session_linked', {
+        external_user_id: externalUserId,
+        privy_user_id: privyUserId,
+        token_sub: readJwtSub(identityToken),
+        token_fp: tokenFingerprint(identityToken),
+      });
 
       clearLaunchQueryParams();
       router.replace(buildAppDestination(exchange));

@@ -78,6 +78,7 @@ export function WithdrawalsPanel() {
       cachedToken: identityToken,
       expectedPrivyUserId,
       fetchFreshToken: () => getIdentityToken(),
+      source: 'WithdrawalsPanel.getAuthToken',
     });
   }, [expectedPrivyUserId, identityToken]);
 

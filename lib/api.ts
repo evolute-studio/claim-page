@@ -14,6 +14,8 @@ import type {
   WithdrawalListResponse,
   WithdrawalStatusResponse,
 } from '@/types/withdrawal';
+import { authDebug, tokenFingerprint } from '@/lib/authDebug';
+import { readJwtSub } from '@/lib/identityToken';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL;
 const WALLET_REQUEST_TIMEOUT_MS = 8_000;
@@ -578,7 +580,11 @@ export async function getClaimStatus(payoutId: string): Promise<StatusResponse> 
 
 export async function getMyPayouts(
   privyIdentityToken: string,
-  cursor?: string
+  cursor?: string,
+  options?: {
+    debugTraceId?: string;
+    debugSource?: string;
+  }
 ): Promise<PayoutListResponse> {
   const DEFAULT_PAYOUT_PAGE_LIMIT = 50;
   const DEFAULT_PAYOUT_STATUSES: PayoutStatus[] = ['CREATED', 'PAID'];
@@ -608,7 +614,24 @@ export async function getMyPayouts(
     query.set('limit', String(DEFAULT_PAYOUT_PAGE_LIMIT));
     query.set('offset', String(offsetCursor ?? 0));
   }
+  const debugTraceId = options?.debugTraceId?.trim() ?? '';
+  if (debugTraceId) {
+    query.set('_dbg_trace', debugTraceId);
+  }
+  const debugSource = options?.debugSource?.trim() ?? '';
+  if (debugSource) {
+    query.set('_dbg_source', debugSource);
+  }
   const url = `${apiBase}/payouts/me?${query.toString()}`;
+  if (debugTraceId || debugSource) {
+    authDebug('api.getMyPayouts.fetch', {
+      trace_id: debugTraceId || null,
+      source: debugSource || null,
+      token_sub: readJwtSub(privyIdentityToken),
+      token_fp: tokenFingerprint(privyIdentityToken),
+      url,
+    });
+  }
 
   const res = await fetch(url, {
     headers: {
@@ -617,6 +640,14 @@ export async function getMyPayouts(
   });
 
   const data = await res.json().catch(() => ({}));
+  if (debugTraceId || debugSource) {
+    authDebug('api.getMyPayouts.response', {
+      trace_id: debugTraceId || null,
+      source: debugSource || null,
+      status: res.status,
+      ok: res.ok,
+    });
+  }
   if (!res.ok) {
     throw new Error(data.message || 'Failed to load payouts');
   }
