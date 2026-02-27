@@ -3,8 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
-import { useLoginWithOAuth, usePrivy } from '@privy-io/react-auth';
-import { EmailLoginSheet } from '@/components/auth/EmailLoginSheet';
+import { usePrivy } from '@privy-io/react-auth';
 
 function sanitizeReturnTo(value: string | null): string | null {
   if (!value) return null;
@@ -12,38 +11,6 @@ function sanitizeReturnTo(value: string | null): string | null {
   if (!trimmed.startsWith('/')) return null;
   if (trimmed.startsWith('//')) return null;
   return trimmed;
-}
-
-function GoogleIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-5 w-5 shrink-0"
-      viewBox="0 0 48 48"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z" />
-      <path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z" />
-      <path fill="#FBBC05" d="M11.69 28.18C11.25 26.86 11 25.45 11 24s.25-2.86.69-4.18v-5.7H4.34A21.99 21.99 0 0 0 2 24c0 3.55.85 6.91 2.34 9.88l7.35-5.7z" />
-      <path fill="#EA4335" d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z" />
-    </svg>
-  );
-}
-
-function AppleIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-5 w-5 shrink-0"
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        d="M15.192 4.413c.878-1.056 1.481-2.496 1.32-3.913-1.266.053-2.829.845-3.735 1.9-.821.948-1.535 2.413-1.346 3.803 1.426.107 2.857-.738 3.761-1.79ZM20.564 17.808c-.564 1.281-.842 1.852-1.568 2.984-1.013 1.581-2.442 3.551-4.214 3.565-1.577.015-1.983-1.03-4.123-1.019-2.142.013-2.589 1.039-4.167 1.023-1.771-.015-3.124-1.79-4.136-3.37-2.833-4.427-3.129-9.626-1.381-12.361 1.245-1.954 3.213-3.097 5.06-3.097 1.886 0 3.073 1.034 4.628 1.034 1.51 0 2.43-1.036 4.612-1.036 1.646 0 3.389.919 4.633 2.503-4.073 2.34-3.414 8.283.656 9.774Z"
-        fill="currentColor"
-      />
-    </svg>
-  );
 }
 
 function EvoluteTopLogo() {
@@ -65,33 +32,13 @@ export default function Home() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { ready, authenticated } = usePrivy();
-  const { initOAuth, loading: oauthLoginLoading } = useLoginWithOAuth();
-  const [loginSheetOpen, setLoginSheetOpen] = useState(false);
-  const [oauthLoginError, setOauthLoginError] = useState<string | null>(null);
+  const [hintVisible, setHintVisible] = useState(false);
 
   useEffect(() => {
     if (!ready || !authenticated) return;
     const returnTo = sanitizeReturnTo(searchParams.get('returnTo'));
     router.replace(returnTo ?? '/app');
   }, [ready, authenticated, router, searchParams]);
-
-  const handleGoogleLogin = async () => {
-    setOauthLoginError(null);
-    try {
-      await initOAuth({ provider: 'google' });
-    } catch {
-      setOauthLoginError('Google sign-in failed. Try again.');
-    }
-  };
-
-  const handleAppleLogin = async () => {
-    setOauthLoginError(null);
-    try {
-      await initOAuth({ provider: 'apple' });
-    } catch {
-      setOauthLoginError('Apple sign-in failed. Try again.');
-    }
-  };
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#0a0a0a] text-white">
@@ -124,44 +71,29 @@ export default function Home() {
             EVOLUTE WALLET
           </div>
 
-          <h1 className="text-3xl font-semibold leading-tight text-white">Sign in</h1>
+          <h1 className="text-3xl font-semibold leading-tight text-white">Open from game</h1>
+          <p className="mt-2 text-sm text-gray-400">
+            Wallet sign-in is available only through the game launch flow.
+          </p>
 
           <button
             type="button"
-            onClick={() => setLoginSheetOpen(true)}
+            onClick={() => setHintVisible(true)}
             disabled={!ready}
-            className="interactive-fx no-shimmer mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-transparent bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:border-white/12 disabled:bg-white/10 disabled:text-white/40"
+            className="interactive-fx no-shimmer mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-white/20 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.07] disabled:border-white/12 disabled:bg-white/10 disabled:text-white/40"
           >
-            {ready ? 'Continue with email' : 'Loading...'}
+            Show sign-in hint
           </button>
 
-          <button
-            type="button"
-            onClick={() => void handleGoogleLogin()}
-            disabled={!ready || oauthLoginLoading}
-            className="interactive-fx no-shimmer mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.07] disabled:border-white/12 disabled:bg-white/10 disabled:text-white/40"
-          >
-            <GoogleIcon />
-            {oauthLoginLoading ? 'Redirecting to Google...' : 'Continue with Google'}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => void handleAppleLogin()}
-            disabled={!ready || oauthLoginLoading}
-            className="interactive-fx no-shimmer mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.07] disabled:border-white/12 disabled:bg-white/10 disabled:text-white/40"
-          >
-            <AppleIcon />
-            {oauthLoginLoading ? 'Redirecting to Apple...' : 'Continue with Apple'}
-          </button>
-
-          {oauthLoginError ? <p className="mt-2 text-xs text-red-300">{oauthLoginError}</p> : null}
+          {hintVisible ? (
+            <p className="mt-2 text-xs text-gray-400">
+              Return to the game and open Wallet there to continue.
+            </p>
+          ) : null}
 
           <p className="mt-3 text-xs text-gray-500">Secure sign-in powered by Privy</p>
         </section>
       </div>
-
-      <EmailLoginSheet open={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
     </main>
   );
 }

@@ -22,16 +22,16 @@ export function PrivyProviderWrapper({ children }: { children: React.ReactNode }
   }
 
   return (
-      <PrivyProvider
+    <PrivyProvider
       appId={PRIVY_APP_ID}
       config={{
-        loginMethods: ['email', 'google', 'apple'],
+        loginMethods: ['google', 'apple'],
         appearance: {
           theme: 'dark',
           accentColor: '#38bdf8',
           logo: '/logo.png',
           landingHeader: 'Sign in',
-          loginMessage: 'Continue with email, Google, or Apple',
+          loginMessage: 'Open wallet from game to sign in',
           showWalletLoginFirst: false,
         },
         embeddedWallets: {

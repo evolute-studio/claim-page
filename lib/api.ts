@@ -1,6 +1,7 @@
 import {
   PayoutListResponse,
   PayoutPreview,
+  PayoutStatus,
   ConfirmResponse,
   StatusResponse,
 } from '@/types/payout';
@@ -29,6 +30,7 @@ export type WalletExchangeErrorCode =
   | 'DEVICE_MISMATCH'
   | 'PAYOUT_TOKEN_REQUIRED'
   | 'PAYOUT_TOKEN_INVALID'
+  | 'WALLET_PROVIDER_NOT_ALLOWED'
   | 'PRIVY_AUTH_NOT_CONFIGURED'
   | 'RATE_LIMITED'
   | 'VALIDATION_ERROR'
@@ -44,13 +46,18 @@ export type WalletExchangeCodeRequest = {
 
 export type WalletSessionLinkedRequest = {
   external_user_id: string;
-  privy_user_id: string;
+  privy_user_id?: string;
   status: 'success';
 };
 
 type WalletExchangeCodeErrorPayload = {
   error_code?: string;
+  code?: string;
   message?: string;
+  error?: {
+    code?: string;
+    message?: string;
+  };
 };
 
 export type WalletExchangeCodeSuccess = {
@@ -94,6 +101,7 @@ function readWalletErrorCode(raw: unknown): WalletExchangeErrorCode {
     raw === 'DEVICE_MISMATCH' ||
     raw === 'PAYOUT_TOKEN_REQUIRED' ||
     raw === 'PAYOUT_TOKEN_INVALID' ||
+    raw === 'WALLET_PROVIDER_NOT_ALLOWED' ||
     raw === 'PRIVY_AUTH_NOT_CONFIGURED' ||
     raw === 'RATE_LIMITED' ||
     raw === 'VALIDATION_ERROR' ||
@@ -107,10 +115,32 @@ function readWalletErrorCode(raw: unknown): WalletExchangeErrorCode {
 function readWalletErrorMessage(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== 'object') return fallback;
   const record = payload as Record<string, unknown>;
+  const nestedError = record.error;
+  if (nestedError && typeof nestedError === 'object') {
+    const message = (nestedError as Record<string, unknown>).message;
+    if (typeof message === 'string' && message.trim()) {
+      return message.trim();
+    }
+  }
   if (typeof record.message === 'string' && record.message.trim()) {
     return record.message.trim();
   }
   return fallback;
+}
+
+function readWalletErrorCodeFromPayload(payload: unknown): WalletExchangeErrorCode {
+  if (!payload || typeof payload !== 'object') return 'INTERNAL_ERROR';
+  const record = payload as Record<string, unknown>;
+  const nestedError = record.error;
+  if (nestedError && typeof nestedError === 'object') {
+    const nestedCode = (nestedError as Record<string, unknown>).code;
+    const parsedNestedCode = readWalletErrorCode(nestedCode);
+    if (parsedNestedCode !== 'INTERNAL_ERROR' || nestedCode === 'INTERNAL_ERROR') {
+      return parsedNestedCode;
+    }
+  }
+  const directCode = record.error_code ?? record.code;
+  return readWalletErrorCode(directCode);
 }
 
 async function fetchWalletJson<T>(
@@ -132,7 +162,7 @@ async function fetchWalletJson<T>(
       | Record<string, unknown>;
 
     if (!res.ok) {
-      const code = readWalletErrorCode((data as WalletExchangeCodeErrorPayload).error_code);
+      const code = readWalletErrorCodeFromPayload(data);
       const message = readWalletErrorMessage(data, fallbackErrorMessage);
       throw new WalletApiError(message, code, res.status);
     }
@@ -194,12 +224,18 @@ export async function exchangeWalletLaunchCode(
 
 export async function markWalletSessionLinked(
   payload: WalletSessionLinkedRequest,
+  privyIdentityToken: string,
   options?: {
     deviceId?: string | null;
   }
 ): Promise<void> {
+  const normalizedPrivyIdentityToken = privyIdentityToken.trim();
+  if (!normalizedPrivyIdentityToken) {
+    throw new WalletApiError('Missing identity token.', 'INTERNAL_ERROR');
+  }
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    Authorization: `Bearer ${normalizedPrivyIdentityToken}`,
   };
   const normalizedDeviceId = options?.deviceId?.trim();
   if (normalizedDeviceId) {
@@ -417,7 +453,7 @@ function normalizePayout(raw: unknown): PayoutPreview | null {
   const amountFormatted = readStringField(record, ['amount_formatted', 'amountFormatted']) ?? '';
   const status = readStringField(record, ['status']) as PayoutPreview['status'] | undefined;
   const recipientEmail =
-    readStringField(record, ['recipient_email', 'recipientEmail', 'email']) ?? '';
+    readStringField(record, ['recipient_email', 'recipientEmail', 'email']) ?? undefined;
 
   const amountMinorUnits = Number(record.amount_minor_units ?? record.amountMinorUnits ?? 0);
   const expiresAt = Number(record.expires_at ?? record.expiresAt ?? 0);
@@ -480,6 +516,7 @@ export async function confirmClaim(
       claim_token: token,
       wallet_address: walletAddress,
       privy_identity_token: privyIdentityToken,
+      privy_access_token: privyIdentityToken,
     },
     'Claim failed'
   );
@@ -495,6 +532,7 @@ export async function confirmClaimByPayoutId(
       payout_id: payoutId,
       wallet_address: walletAddress,
       privy_identity_token: privyIdentityToken,
+      privy_access_token: privyIdentityToken,
     },
     'Claim failed'
   );
@@ -506,6 +544,7 @@ async function confirmClaimInternal(
     payout_id?: string;
     wallet_address: string;
     privy_identity_token: string;
+    privy_access_token?: string;
   },
   fallbackError: string
 ): Promise<ConfirmResponse> {
@@ -541,9 +580,35 @@ export async function getMyPayouts(
   privyIdentityToken: string,
   cursor?: string
 ): Promise<PayoutListResponse> {
+  const DEFAULT_PAYOUT_PAGE_LIMIT = 50;
+  const DEFAULT_PAYOUT_STATUSES: PayoutStatus[] = ['CREATED', 'PAID'];
+  const parseOffsetCursor = (rawCursor: string): number | null => {
+    const match = rawCursor.match(/^offset:(\d+)$/);
+    if (!match?.[1]) return null;
+    const parsed = Number(match[1]);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const readFiniteNumber = (value: unknown): number | undefined => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+  };
+
+  const normalizedCursor = cursor?.trim() ?? '';
+  const offsetCursor = normalizedCursor ? parseOffsetCursor(normalizedCursor) : null;
   const apiBase = getApiBaseOrThrow();
-  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
-  const url = `${apiBase}/payouts/me${query}`;
+  const query = new URLSearchParams();
+  if (normalizedCursor && offsetCursor === null) {
+    query.set('cursor', normalizedCursor);
+  } else {
+    query.set('status', DEFAULT_PAYOUT_STATUSES.join(','));
+    query.set('limit', String(DEFAULT_PAYOUT_PAGE_LIMIT));
+    query.set('offset', String(offsetCursor ?? 0));
+  }
+  const url = `${apiBase}/payouts/me?${query.toString()}`;
 
   const res = await fetch(url, {
     headers: {
@@ -561,9 +626,29 @@ export async function getMyPayouts(
     .map((item: unknown) => normalizePayout(item))
     .filter((item: PayoutPreview | null): item is PayoutPreview => item !== null);
 
+  const rawTotal = readFiniteNumber(data.total);
+  const rawLimit = readFiniteNumber(data.limit);
+  const rawOffset = readFiniteNumber(data.offset);
+  const normalizedOffset = rawOffset ?? offsetCursor ?? 0;
+  const normalizedLimit = rawLimit ?? DEFAULT_PAYOUT_PAGE_LIMIT;
+
+  let nextCursor: string | null =
+    typeof data.next_cursor === 'string' && data.next_cursor.trim()
+      ? data.next_cursor.trim()
+      : null;
+  if (!nextCursor && typeof rawTotal === 'number') {
+    const nextOffset = normalizedOffset + payouts.length;
+    if (nextOffset < rawTotal) {
+      nextCursor = `offset:${nextOffset}`;
+    }
+  }
+
   return {
     payouts,
-    next_cursor: data.next_cursor ?? null,
+    next_cursor: nextCursor,
+    total: rawTotal,
+    limit: normalizedLimit,
+    offset: normalizedOffset,
   };
 }
 

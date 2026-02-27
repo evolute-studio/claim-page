@@ -25,7 +25,7 @@ export interface PayoutPreview {
   paid_at?: number;
   tx_hash?: string;
   failure_reason?: string;
-  recipient_email: string;
+  recipient_email?: string;
   rank?: number;
 }
 
@@ -47,4 +47,7 @@ export interface StatusResponse {
 export interface PayoutListResponse {
   payouts: PayoutPreview[];
   next_cursor?: string | null;
+  total?: number;
+  limit?: number;
+  offset?: number;
 }

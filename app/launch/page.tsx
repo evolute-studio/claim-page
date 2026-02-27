@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
-import { usePrivy, useSubscribeToJwtAuthWithFlag } from '@privy-io/react-auth';
+import { getIdentityToken, usePrivy, useSubscribeToJwtAuthWithFlag } from '@privy-io/react-auth';
 import type { User } from '@privy-io/react-auth';
 import {
   exchangeWalletLaunchCode,
@@ -14,7 +14,7 @@ import {
 } from '@/lib/api';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 
-type LaunchScreen = 'loading' | 'open_from_game' | 'session_conflict' | 'sign_in_required' | 'error';
+type LaunchScreen = 'loading' | 'open_from_game' | 'session_conflict' | 'error';
 
 type LaunchErrorState = {
   title: string;
@@ -23,10 +23,6 @@ type LaunchErrorState = {
 };
 
 type ConflictState = {
-  emailHint: string | null;
-};
-
-type SignInRequiredState = {
   emailHint: string | null;
 };
 
@@ -106,14 +102,6 @@ function clearLaunchQueryParams() {
   window.history.replaceState(window.history.state, '', next);
 }
 
-function buildSignInRouteFromCurrentLocation(): string {
-  if (typeof window === 'undefined') {
-    return '/';
-  }
-  const returnTo = `${window.location.pathname}${window.location.search}`;
-  return `/?returnTo=${encodeURIComponent(returnTo)}`;
-}
-
 function toLaunchErrorState(error: unknown): LaunchErrorState {
   if (error instanceof WalletApiError) {
     switch (error.code) {
@@ -129,6 +117,12 @@ function toLaunchErrorState(error: unknown): LaunchErrorState {
         return { title: 'Payout token required', message: 'This launch flow requires a token.', code: error.code };
       case 'PAYOUT_TOKEN_INVALID':
         return { title: 'Invalid token', message: 'Provided payout token is invalid.', code: error.code };
+      case 'WALLET_PROVIDER_NOT_ALLOWED':
+        return {
+          title: 'Provider not allowed',
+          message: 'Sign in to wallet through game with Google or Apple account.',
+          code: error.code,
+        };
       case 'PRIVY_AUTH_NOT_CONFIGURED':
         return {
           title: 'Sign-in temporarily unavailable',
@@ -210,7 +204,6 @@ function LaunchContent() {
   const [screen, setScreen] = useState<LaunchScreen>('loading');
   const [errorState, setErrorState] = useState<LaunchErrorState | null>(null);
   const [conflictState, setConflictState] = useState<ConflictState | null>(null);
-  const [signInRequiredState, setSignInRequiredState] = useState<SignInRequiredState | null>(null);
   const [externalJwt, setExternalJwt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const exchangeCacheKey = useMemo(() => getExchangeCacheKey(code, token), [code, token]);
@@ -251,12 +244,17 @@ function LaunchContent() {
 
   const finalizeSuccess = useCallback(
     async (exchange: WalletExchangeCodeSuccess, externalUserId: string, privyUserId: string) => {
+      const identityToken = await getIdentityToken();
+      if (!identityToken) {
+        throw new WalletApiError('Missing identity token after sign-in.', 'INTERNAL_ERROR');
+      }
       await markWalletSessionLinked(
         {
           external_user_id: externalUserId,
-          privy_user_id: privyUserId,
+          ...(privyUserId ? { privy_user_id: privyUserId } : {}),
           status: 'success',
         },
+        identityToken,
         { deviceId: deviceIdRef.current }
       );
 
@@ -275,7 +273,6 @@ function LaunchContent() {
       setBusy(true);
       setErrorState(null);
       setConflictState(null);
-      setSignInRequiredState(null);
       setScreen('loading');
 
       try {
@@ -308,13 +305,6 @@ function LaunchContent() {
           throw new WalletApiError('Invalid launch API response.', 'INTERNAL_ERROR');
         }
 
-        const redirectToLogin = async (logoutFirst: boolean) => {
-          if (logoutFirst) {
-            await logout();
-          }
-          router.replace(buildSignInRouteFromCurrentLocation());
-        };
-
         if (!authenticatedRef.current || !userRef.current) {
           const launchJwt = exchange.jwt?.trim() ?? '';
           if (launchJwt) {
@@ -345,14 +335,11 @@ function LaunchContent() {
             }
           }
 
-          if (mode === 'force_switch') {
-            await redirectToLogin(false);
-            return;
-          }
-          setSignInRequiredState({
-            emailHint: exchange.expected_user.email_hint ?? null,
+          setErrorState({
+            title: 'Launch sign-in unavailable',
+            message: 'Open wallet from game and try again.',
           });
-          setScreen('sign_in_required');
+          setScreen('error');
           return;
         }
 
@@ -382,8 +369,20 @@ function LaunchContent() {
           setScreen('session_conflict');
           return;
         }
-
-        await redirectToLogin(true);
+        await logout();
+        const launchJwt = exchange.jwt?.trim() ?? '';
+        if (!launchJwt) {
+          setErrorState({
+            title: 'Switch failed',
+            message: 'Open wallet from game and try again.',
+          });
+          setScreen('error');
+          return;
+        }
+        jwtAttemptedRef.current = false;
+        setExternalJwt(launchJwt);
+        jwtAttemptedRef.current = true;
+        setScreen('loading');
       } catch (error: unknown) {
         setErrorState(toLaunchErrorState(error));
         setScreen('error');
@@ -486,7 +485,7 @@ function LaunchContent() {
                 disabled={busy}
                 className="interactive-fx no-shimmer mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-transparent bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:bg-white/30"
               >
-                {busy ? 'Continuing...' : 'Sign in with another account'}
+                {busy ? 'Switching...' : 'Switch account'}
               </button>
               <button
                 type="button"
@@ -494,33 +493,6 @@ function LaunchContent() {
                 className="interactive-fx no-shimmer mt-3 inline-flex w-full items-center justify-center rounded-2xl border border-white/20 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.07]"
               >
                 Cancel
-              </button>
-            </>
-          ) : null}
-
-          {screen === 'sign_in_required' ? (
-            <>
-              <h1 className="mt-3 text-2xl font-semibold leading-tight text-white">Sign in required</h1>
-              <p className="mt-2 text-sm text-gray-400">
-                Continue by signing in with the account tied to this launch link.
-                {signInRequiredState?.emailHint
-                  ? ` Expected account: ${signInRequiredState.emailHint}.`
-                  : ''}
-              </p>
-              <button
-                type="button"
-                onClick={() => void executeFlow('force_switch')}
-                disabled={busy}
-                className="interactive-fx no-shimmer mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-transparent bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:bg-white/30"
-              >
-                {busy ? 'Continuing...' : 'Go to sign in'}
-              </button>
-              <button
-                type="button"
-                onClick={handleBackToGame}
-                className="interactive-fx no-shimmer mt-3 inline-flex w-full items-center justify-center rounded-2xl border border-white/20 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.07]"
-              >
-                Back to game
               </button>
             </>
           ) : null}
