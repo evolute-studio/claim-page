@@ -39,7 +39,6 @@ export function LoadingSpinner({ size = 'md' }: LoadingSpinnerProps) {
           strokeLinecap="round"
         />
       </svg>
-      <span className="pointer-events-none absolute inset-[36%] rounded-full bg-white/25 blur-[1.5px]" />
     </span>
   );
 }

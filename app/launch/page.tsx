@@ -31,11 +31,17 @@ type ConflictState = {
 const exchangeSuccessCache = new Map<string, WalletExchangeCodeSuccess>();
 const exchangeInFlightCache = new Map<string, Promise<WalletExchangeCodeSuccess>>();
 
-function usePerceivedLaunchProgress(): number {
+function usePerceivedLaunchProgress(runId: number, shouldComplete: boolean): number {
   const [progress, setProgress] = useState(10);
   const progressRef = useRef(10);
 
   useEffect(() => {
+    if (shouldComplete) {
+      progressRef.current = 100;
+      setProgress(100);
+      return;
+    }
+
     progressRef.current = 10;
     setProgress(10);
     let rafId = 0;
@@ -63,34 +69,58 @@ function usePerceivedLaunchProgress(): number {
 
     rafId = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(rafId);
-  }, []);
+  }, [runId, shouldComplete]);
 
   return progress;
 }
 
-function LaunchLoadingState() {
-  const progress = usePerceivedLaunchProgress();
+function LaunchLoadingState({
+  runId,
+  shouldComplete,
+}: {
+  runId: number;
+  shouldComplete: boolean;
+}) {
+  const progress = usePerceivedLaunchProgress(runId, shouldComplete);
 
   return (
-    <>
-      <h1 className="mt-3 text-2xl font-semibold leading-tight text-white">Launching wallet...</h1>
-      <p className="mt-2 text-sm text-gray-400">
-        Checking session and completing secure sign-in.
-      </p>
-      <div className="mt-5 inline-flex items-center justify-center">
-        <LoadingSpinner size="lg" />
-      </div>
+    <div className="relative h-2 overflow-hidden rounded-full bg-white/10">
+      <div
+        className="h-full rounded-full bg-gradient-to-r from-[#b7d8ff] via-white to-[#9ec9ff] transition-[width] duration-300 ease-out"
+        style={{ width: `${progress}%` }}
+      />
+      <div className="launch-progress-shimmer absolute inset-y-0 left-0 w-20" />
+    </div>
+  );
+}
 
-      <div className="mt-6 text-left">
-        <div className="relative h-2 overflow-hidden rounded-full bg-white/10">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-[#b7d8ff] via-white to-[#9ec9ff] transition-[width] duration-300 ease-out"
-            style={{ width: `${progress}%` }}
-          />
-          <div className="launch-progress-shimmer absolute inset-y-0 left-0 w-20" />
+function LaunchLoadingScreen({
+  runId,
+  shouldComplete,
+}: {
+  runId: number;
+  shouldComplete: boolean;
+}) {
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-[#0a0a0a] text-white">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -left-24 top-16 h-64 w-64 rounded-full bg-white/[0.04] blur-3xl" />
+        <div className="absolute -right-20 bottom-24 h-72 w-72 rounded-full bg-white/[0.03] blur-3xl" />
+      </div>
+      <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col items-center justify-center px-6">
+        <Image
+          src="/logo.svg"
+          alt="Evolute"
+          width={190}
+          height={50}
+          priority
+          className="h-auto w-[170px]"
+        />
+        <div className="mt-16 w-full max-w-[380px]">
+          <LaunchLoadingState runId={runId} shouldComplete={shouldComplete} />
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -284,6 +314,8 @@ function LaunchContent() {
   const [conflictState, setConflictState] = useState<ConflictState | null>(null);
   const [externalJwt, setExternalJwt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadingRunId, setLoadingRunId] = useState(0);
+  const [loadingShouldComplete, setLoadingShouldComplete] = useState(false);
   const exchangeCacheKey = useMemo(() => getExchangeCacheKey(code, token), [code, token]);
 
   const deviceIdRef = useRef<string | null>(null);
@@ -350,6 +382,10 @@ function LaunchContent() {
         token_fp: tokenFingerprint(identityToken),
       });
 
+      setScreen('loading');
+      setLoadingShouldComplete(true);
+      await new Promise((resolve) => window.setTimeout(resolve, 420));
+
       clearLaunchQueryParams();
       router.replace(buildPostLaunchDestination(exchange));
     },
@@ -365,6 +401,8 @@ function LaunchContent() {
       setBusy(true);
       setErrorState(null);
       setConflictState(null);
+      setLoadingShouldComplete(false);
+      setLoadingRunId((current) => current + 1);
       setScreen('loading');
 
       try {
@@ -543,6 +581,10 @@ function LaunchContent() {
     router.replace('/');
   }, [router]);
 
+  if (screen === 'loading') {
+    return <LaunchLoadingScreen runId={loadingRunId} shouldComplete={loadingShouldComplete} />;
+  }
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#0a0a0a] text-white">
       <div className="pointer-events-none absolute inset-0">
@@ -552,12 +594,10 @@ function LaunchContent() {
       <EvoluteTopLogo />
 
       <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-8">
-        <section className="animate-fade-in-up rounded-3xl border border-white/10 bg-[#111111]/95 p-6 text-center shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
+        <section
+          className="relative animate-fade-in-up rounded-3xl border border-white/10 bg-[#111111]/95 p-6 text-center shadow-[0_24px_64px_rgba(0,0,0,0.5)]"
+        >
           <p className="text-xs font-medium tracking-[0.14em] text-gray-400">EVOLUTE WALLET</p>
-
-          {screen === 'loading' ? (
-            <LaunchLoadingState />
-          ) : null}
 
           {screen === 'open_from_game' ? (
             <>
