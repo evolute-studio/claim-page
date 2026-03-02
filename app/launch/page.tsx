@@ -28,6 +28,8 @@ type ConflictState = {
   emailHint: string | null;
 };
 
+type LaunchFlowMode = 'initial' | 'retry' | 'force_switch' | 'post_auth_retry';
+
 const exchangeSuccessCache = new Map<string, WalletExchangeCodeSuccess>();
 const exchangeInFlightCache = new Map<string, Promise<WalletExchangeCodeSuccess>>();
 
@@ -393,7 +395,7 @@ function LaunchContent() {
   );
 
   const executeFlow = useCallback(
-    async (mode: 'initial' | 'retry' | 'force_switch') => {
+    async (mode: LaunchFlowMode) => {
       if (flowLockRef.current) return;
       if (!readyRef.current) return;
 
@@ -402,7 +404,9 @@ function LaunchContent() {
       setErrorState(null);
       setConflictState(null);
       setLoadingShouldComplete(false);
-      setLoadingRunId((current) => current + 1);
+      if (mode !== 'post_auth_retry') {
+        setLoadingRunId((current) => current + 1);
+      }
       setScreen('loading');
 
       try {
@@ -570,7 +574,7 @@ function LaunchContent() {
     if (!authenticated) return;
     if (flowLockRef.current) return;
     setExternalJwt(null);
-    void executeFlow('retry');
+    void executeFlow('post_auth_retry');
   }, [authenticated, executeFlow, isDebugPreview, ready]);
 
   const handleBackToGame = useCallback(() => {
