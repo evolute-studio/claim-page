@@ -31,6 +31,69 @@ type ConflictState = {
 const exchangeSuccessCache = new Map<string, WalletExchangeCodeSuccess>();
 const exchangeInFlightCache = new Map<string, Promise<WalletExchangeCodeSuccess>>();
 
+function usePerceivedLaunchProgress(): number {
+  const [progress, setProgress] = useState(10);
+  const progressRef = useRef(10);
+
+  useEffect(() => {
+    progressRef.current = 10;
+    setProgress(10);
+    let rafId = 0;
+    let lastTs = 0;
+    const cap = 95;
+
+    const tick = (ts: number) => {
+      if (!lastTs) {
+        lastTs = ts;
+      }
+      const dt = Math.min(ts - lastTs, 64);
+      lastTs = ts;
+
+      const current = progressRef.current;
+      const remaining = Math.max(0, cap - current);
+      const phaseMultiplier = current < 45 ? 1.65 : current < 75 ? 0.92 : 0.32;
+      const baseStep = (dt / 1000) * 22 * phaseMultiplier;
+      const adaptiveStep = remaining * (dt / 1000) * (current < 70 ? 0.18 : 0.09);
+      const next = Math.min(cap, current + Math.max(baseStep, adaptiveStep));
+
+      progressRef.current = next;
+      setProgress(next);
+      rafId = window.requestAnimationFrame(tick);
+    };
+
+    rafId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(rafId);
+  }, []);
+
+  return progress;
+}
+
+function LaunchLoadingState() {
+  const progress = usePerceivedLaunchProgress();
+
+  return (
+    <>
+      <h1 className="mt-3 text-2xl font-semibold leading-tight text-white">Launching wallet...</h1>
+      <p className="mt-2 text-sm text-gray-400">
+        Checking session and completing secure sign-in.
+      </p>
+      <div className="mt-5 inline-flex items-center justify-center">
+        <LoadingSpinner size="lg" />
+      </div>
+
+      <div className="mt-6 text-left">
+        <div className="relative h-2 overflow-hidden rounded-full bg-white/10">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-[#b7d8ff] via-white to-[#9ec9ff] transition-[width] duration-300 ease-out"
+            style={{ width: `${progress}%` }}
+          />
+          <div className="launch-progress-shimmer absolute inset-y-0 left-0 w-20" />
+        </div>
+      </div>
+    </>
+  );
+}
+
 function EvoluteTopLogo() {
   return (
     <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-[42vh] min-h-32 max-h-72 items-center justify-center">
@@ -205,7 +268,16 @@ function LaunchContent() {
   const searchParams = useSearchParams();
   const code = searchParams.get('code')?.trim() ?? '';
   const token = searchParams.get('token')?.trim() ?? '';
+  const debugScreenRaw = searchParams.get('debugScreen')?.trim().toLowerCase() ?? '';
   const { ready, authenticated, user, logout } = usePrivy();
+  const debugScreen: LaunchScreen | null =
+    debugScreenRaw === 'loading' ||
+    debugScreenRaw === 'open_from_game' ||
+    debugScreenRaw === 'session_conflict' ||
+    debugScreenRaw === 'error'
+      ? debugScreenRaw
+      : null;
+  const isDebugPreview = process.env.NODE_ENV !== 'production' && !!debugScreen;
 
   const [screen, setScreen] = useState<LaunchScreen>('loading');
   const [errorState, setErrorState] = useState<LaunchErrorState | null>(null);
@@ -422,14 +494,38 @@ function LaunchContent() {
   );
 
   useEffect(() => {
+    if (!isDebugPreview || !debugScreen) return;
+    setBusy(false);
+    setScreen(debugScreen);
+    if (debugScreen === 'session_conflict') {
+      setConflictState({
+        emailHint: 'player@example.com',
+      });
+      return;
+    }
+    if (debugScreen === 'error') {
+      setErrorState({
+        title: 'Debug launch error',
+        message: 'This is a local preview state for UI testing.',
+        code: 'INTERNAL_ERROR',
+      });
+      return;
+    }
+    setConflictState(null);
+    setErrorState(null);
+  }, [debugScreen, isDebugPreview]);
+
+  useEffect(() => {
+    if (isDebugPreview) return;
     if (!ready) return;
     if (launchStartedRef.current) return;
     launchStartedRef.current = true;
     deviceIdRef.current = readDeviceIdFromBrowser();
     void executeFlow('initial');
-  }, [executeFlow, ready]);
+  }, [executeFlow, isDebugPreview, ready]);
 
   useEffect(() => {
+    if (isDebugPreview) return;
     if (!ready) return;
     if (!launchStartedRef.current) return;
     if (!jwtAttemptedRef.current) return;
@@ -437,7 +533,7 @@ function LaunchContent() {
     if (flowLockRef.current) return;
     setExternalJwt(null);
     void executeFlow('retry');
-  }, [authenticated, executeFlow, ready]);
+  }, [authenticated, executeFlow, isDebugPreview, ready]);
 
   const handleBackToGame = useCallback(() => {
     if (typeof window !== 'undefined' && window.history.length > 1) {
@@ -460,15 +556,7 @@ function LaunchContent() {
           <p className="text-xs font-medium tracking-[0.14em] text-gray-400">EVOLUTE WALLET</p>
 
           {screen === 'loading' ? (
-            <>
-              <h1 className="mt-3 text-2xl font-semibold leading-tight text-white">Launching wallet...</h1>
-              <p className="mt-2 text-sm text-gray-400">
-                Checking session and completing secure sign-in.
-              </p>
-              <div className="mt-5 inline-flex items-center justify-center">
-                <LoadingSpinner size="lg" />
-              </div>
-            </>
+            <LaunchLoadingState />
           ) : null}
 
           {screen === 'open_from_game' ? (

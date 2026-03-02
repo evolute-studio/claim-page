@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const STATIC_CACHE_NAME = `evolute-static-${CACHE_VERSION}`;
 const OFFLINE_URL = '/offline.html';
 
@@ -11,8 +11,8 @@ const PRECACHE_URLS = [
 ];
 
 function isStaticAsset(pathname) {
+  if (pathname.startsWith('/_next/static/')) return false;
   return (
-    pathname.startsWith('/_next/static/') ||
     pathname.startsWith('/icons/') ||
     pathname.startsWith('/fonts/') ||
     pathname.startsWith('/pwa/') ||
