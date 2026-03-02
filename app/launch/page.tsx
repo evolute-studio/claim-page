@@ -150,18 +150,22 @@ function toLaunchErrorState(error: unknown): LaunchErrorState {
   return { title: 'Launch error', message: 'Something went wrong. Please try again.' };
 }
 
-function buildAppDestination(exchange: WalletExchangeCodeSuccess): string {
-  const params = new URLSearchParams();
-  params.set('tab', 'wallet');
+function buildPostLaunchDestination(exchange: WalletExchangeCodeSuccess): string {
+  const claimToken = exchange.payout_context?.claim_token?.trim() ?? '';
+  const payoutId = exchange.payout_context?.payout_id?.trim() ?? '';
 
-  if (exchange.payout_context?.claim_token) {
-    params.set('focusToken', exchange.payout_context.claim_token);
-  }
-  if (exchange.payout_context?.payout_id) {
-    params.set('focusPayout', exchange.payout_context.payout_id);
+  if (claimToken || payoutId) {
+    const claimParams = new URLSearchParams();
+    if (claimToken) {
+      claimParams.set('token', claimToken);
+    }
+    if (payoutId) {
+      claimParams.set('payoutId', payoutId);
+    }
+    return `/claim/decision?${claimParams.toString()}`;
   }
 
-  return `/app?${params.toString()}`;
+  return '/app?tab=wallet';
 }
 
 function getExchangeCacheKey(code: string, token: string): string {
@@ -275,7 +279,7 @@ function LaunchContent() {
       });
 
       clearLaunchQueryParams();
-      router.replace(buildAppDestination(exchange));
+      router.replace(buildPostLaunchDestination(exchange));
     },
     [router]
   );
