@@ -10,6 +10,7 @@ import { HistoryPanel } from '@/components/HistoryPanel';
 import { truncateAddress } from '@/lib/format';
 
 type AppTab = 'wallet' | 'history';
+type AppDebugScreen = 'loading' | 'setup' | 'app';
 
 function AccountIcon() {
   return (
@@ -95,21 +96,30 @@ export default function AppPage() {
   const queryFocusPayout = searchParams.get('focusPayout');
   const queryFocusWithdrawal = searchParams.get('focusWithdrawal');
   const queryTab = searchParams.get('tab');
-  const walletAddress = wallets[0]?.address ?? null;
+  const debugRaw = searchParams.get('debug')?.trim().toLowerCase() ?? '';
+  const debugScreenRaw = searchParams.get('debugScreen')?.trim().toLowerCase() ?? '';
+  const isDebugPreview = process.env.NODE_ENV !== 'production' && (debugRaw === '1' || debugRaw === 'true');
+  const debugScreen: AppDebugScreen =
+    debugScreenRaw === 'loading' || debugScreenRaw === 'setup' || debugScreenRaw === 'app'
+      ? debugScreenRaw
+      : 'app';
+  const walletAddress = wallets[0]?.address ?? (isDebugPreview ? '0xdebug000000000000000000000000000000000000' : null);
 
   useEffect(() => {
     routerRef.current = router;
   }, [router]);
 
   useEffect(() => {
+    if (isDebugPreview) return;
     if (!ready) return;
     if (!authenticated) {
       walletCreateAttemptedRef.current = false;
       router.replace('/');
     }
-  }, [ready, authenticated, router]);
+  }, [authenticated, isDebugPreview, ready, router]);
 
   useEffect(() => {
+    if (isDebugPreview) return;
     if (!ready || !authenticated || !walletsReady) return;
     const hasEmbeddedWallet = wallets.some(
       (wallet) => wallet.walletClientType === 'privy' || wallet.walletClientType === 'privy-v2'
@@ -125,7 +135,7 @@ export default function AppPage() {
       .finally(() => {
         setIsCreatingEmbeddedWallet(false);
       });
-  }, [authenticated, createWallet, ready, wallets, walletsReady]);
+  }, [authenticated, createWallet, isDebugPreview, ready, wallets, walletsReady]);
 
   useEffect(() => {
     if (!queryFocusToken && !queryFocusPayout && !queryFocusWithdrawal) return;
@@ -142,13 +152,40 @@ export default function AppPage() {
     }
     if (queryTab === 'payouts' || queryTab === 'withdrawals') {
       setActiveTab('history');
-      routerRef.current.replace('/app?tab=history');
+      const params = new URLSearchParams();
+      params.set('tab', 'history');
+      if (isDebugPreview) {
+        params.set('debug', '1');
+      }
+      routerRef.current.replace(`/app?${params.toString()}`);
     }
-  }, [queryTab]);
+  }, [isDebugPreview, queryTab]);
+
+  const buildAppUrl = useCallback(
+    (
+      tab: AppTab,
+      extra?: {
+        focusToken?: string | null;
+        focusPayout?: string | null;
+        focusWithdrawal?: string | null;
+      }
+    ) => {
+      const params = new URLSearchParams();
+      params.set('tab', tab);
+      if (isDebugPreview) {
+        params.set('debug', '1');
+      }
+      if (extra?.focusToken) params.set('focusToken', extra.focusToken);
+      if (extra?.focusPayout) params.set('focusPayout', extra.focusPayout);
+      if (extra?.focusWithdrawal) params.set('focusWithdrawal', extra.focusWithdrawal);
+      return `/app?${params.toString()}`;
+    },
+    [isDebugPreview]
+  );
 
   const handleTabChange = (tab: AppTab) => {
     setActiveTab(tab);
-    router.replace(`/app?tab=${tab}`);
+    router.replace(buildAppUrl(tab));
   };
 
   const handleClaimedPayoutFocus = useCallback(
@@ -158,9 +195,14 @@ export default function AppPage() {
       setFocusWithdrawalRef(null);
       setFocusTargetTab('history');
       setActiveTab('history');
-      router.replace('/app?tab=history');
+      router.replace(
+        buildAppUrl('history', {
+          focusToken: next.focusToken ?? null,
+          focusPayout: next.focusPayoutRef ?? null,
+        })
+      );
     },
-    [router]
+    [buildAppUrl, router]
   );
 
   const handleCreatedWithdrawalFocus = useCallback(
@@ -171,12 +213,13 @@ export default function AppPage() {
       setFocusWithdrawalRef(withdrawalRef);
       setFocusTargetTab('history');
       setActiveTab('history');
-      const params = new URLSearchParams();
-      params.set('tab', 'history');
-      if (withdrawalRef) params.set('focusWithdrawal', withdrawalRef);
-      router.replace(`/app?${params.toString()}`);
+      router.replace(
+        buildAppUrl('history', {
+          focusWithdrawal: withdrawalRef,
+        })
+      );
     },
-    [router]
+    [buildAppUrl, router]
   );
 
   const copyText = useCallback(async (value: string): Promise<boolean> => {
@@ -212,6 +255,17 @@ export default function AppPage() {
     }
   }, [copyText, walletAddress]);
 
+  if (isDebugPreview && debugScreen === 'loading') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center">
+          <LoadingSpinner size="lg" />
+          <p className="mt-3 text-sm text-gray-400">Debug preview: app loading screen.</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!ready) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -220,11 +274,22 @@ export default function AppPage() {
     );
   }
 
-  if (!authenticated) {
+  if (!authenticated && !isDebugPreview) {
     return null;
   }
 
-  if (isCreatingEmbeddedWallet && !walletAddress) {
+  if (isDebugPreview && debugScreen === 'setup') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center">
+          <LoadingSpinner size="lg" />
+          <p className="mt-3 text-sm text-gray-400">Debug preview: setting up embedded wallet...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isDebugPreview && isCreatingEmbeddedWallet && !walletAddress) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
@@ -295,7 +360,7 @@ export default function AppPage() {
             <button
               type="button"
               className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-200 transition hover:border-white/25 hover:bg-white/10 hover:text-white"
-              onClick={() => router.push('/app/account')}
+              onClick={() => router.push(isDebugPreview ? '/app/account?debug=1' : '/app/account')}
               aria-label="Open account page"
             >
               <MenuIcon />
@@ -317,6 +382,7 @@ export default function AppPage() {
                 isActive={activeTab === 'wallet'}
                 focusToken={focusTargetTab === 'wallet' ? focusToken : null}
                 focusPayoutRef={focusTargetTab === 'wallet' ? focusPayoutRef : null}
+                debugPreview={isDebugPreview}
                 onClaimedPayoutFocus={handleClaimedPayoutFocus}
                 onCreatedWithdrawalFocus={handleCreatedWithdrawalFocus}
               />

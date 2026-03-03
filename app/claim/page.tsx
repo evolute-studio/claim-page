@@ -64,6 +64,7 @@ type ClaimStatusUi = {
   badge: string;
   tone: 'neutral' | 'success' | 'warning' | 'danger';
 };
+type ClaimDebugState = 'loading' | 'input' | 'error' | 'not_found' | 'ready' | 'paid';
 
 function getClaimStatusUi(status: PayoutPreview['status']): ClaimStatusUi {
   switch (status) {
@@ -118,7 +119,18 @@ function getClaimStatusUi(status: PayoutPreview['status']): ClaimStatusUi {
 function ClaimContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const token = searchParams.get('token');
+  const token = searchParams.get('token')?.trim() ?? '';
+  const debugStateRaw = searchParams.get('debugState')?.trim().toLowerCase() ?? '';
+  const debugState: ClaimDebugState | null =
+    debugStateRaw === 'loading' ||
+    debugStateRaw === 'input' ||
+    debugStateRaw === 'error' ||
+    debugStateRaw === 'not_found' ||
+    debugStateRaw === 'ready' ||
+    debugStateRaw === 'paid'
+      ? debugStateRaw
+      : null;
+  const isDebugPreview = process.env.NODE_ENV !== 'production' && !!debugState;
 
   const { ready, authenticated } = usePrivy();
 
@@ -200,6 +212,7 @@ function ClaimContent() {
   }, [amountLabel]);
 
   useEffect(() => {
+    if (isDebugPreview) return;
     if (!ready || !authenticated) return;
     if (loading) return;
     if (!preview || !!error) return;
@@ -223,9 +236,54 @@ function ClaimContent() {
     ready,
     router,
     token,
+    isDebugPreview,
   ]);
 
   useEffect(() => {
+    if (isDebugPreview) {
+      if (debugState === 'loading') {
+        setLoading(true);
+        setPreview(null);
+        setError(null);
+        return;
+      }
+      if (debugState === 'input') {
+        setLoading(false);
+        setPreview(null);
+        setError(null);
+        return;
+      }
+      if (debugState === 'error') {
+        setLoading(false);
+        setPreview(null);
+        setError('Mock error: claim not found.');
+        return;
+      }
+      if (debugState === 'not_found') {
+        setLoading(false);
+        setPreview(null);
+        setError(null);
+        return;
+      }
+
+      const status = debugState === 'paid' ? 'PAID' : 'CREATED';
+      setLoading(false);
+      setError(null);
+      setPreview({
+        id: 'debug-payout-id',
+        payout_id: 'debug-payout-id',
+        claim_token: 'debug-claim-token',
+        asset: 'USDC',
+        chain: 'base',
+        amount_minor_units: 12_345_000,
+        amount_formatted: '12.345',
+        status,
+        expires_at: Date.now() + 60 * 60 * 1000,
+        recipient_email: 'player@example.com',
+      });
+      return;
+    }
+
     const requestId = ++previewRequestIdRef.current;
     const controller = new AbortController();
 
@@ -259,7 +317,7 @@ function ClaimContent() {
     return () => {
       controller.abort();
     };
-  }, [token]);
+  }, [debugState, isDebugPreview, token]);
 
   const handleTokenSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -271,6 +329,9 @@ function ClaimContent() {
   const handleOpenWallet = () => {
     const params = new URLSearchParams();
     params.set('tab', 'history');
+    if (isDebugPreview) {
+      params.set('debug', '1');
+    }
     if (token) params.set('focusToken', token);
     if (previewFocusPayoutRef) params.set('focusPayout', previewFocusPayoutRef);
     router.push(`/app?${params.toString()}`);
@@ -297,7 +358,7 @@ function ClaimContent() {
     );
   }
 
-  if (!token) {
+  if (!token && (!isDebugPreview || debugState === 'input')) {
     return (
       <div className="relative min-h-screen overflow-hidden bg-[#0a0a0a] text-white">
         <div className="pointer-events-none absolute inset-0">

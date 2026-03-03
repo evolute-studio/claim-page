@@ -235,6 +235,16 @@ const NETWORK_ICON_PRELOAD_URLS = Array.from(
 );
 const CLAIMABLE_HIGHLIGHT_DURATION_MS = 2800;
 const CLAIMABLE_HIGHLIGHT_SCROLL_DELAY_MS = 90;
+const WALLET_ACTIVE_PAYOUT_STATUSES: PayoutPreview['status'][] = [
+  'CREATED',
+  'PENDING_EMAIL',
+  'PENDING_APPROVAL',
+  'PAYING',
+];
+
+function isWalletActivePayoutStatus(status: PayoutPreview['status']): boolean {
+  return WALLET_ACTIVE_PAYOUT_STATUSES.includes(status);
+}
 
 function getWalletPayoutSortPriority(status: PayoutPreview['status']): number {
   if (status === 'CREATED') return 0;
@@ -346,12 +356,14 @@ export function WalletPanel({
   isActive = true,
   focusToken = null,
   focusPayoutRef = null,
+  debugPreview = false,
   onClaimedPayoutFocus,
   onCreatedWithdrawalFocus,
 }: {
   isActive?: boolean;
   focusToken?: string | null;
   focusPayoutRef?: string | null;
+  debugPreview?: boolean;
   onClaimedPayoutFocus?: (next: { focusToken?: string | null; focusPayoutRef?: string | null }) => void;
   onCreatedWithdrawalFocus?: (next: { focusWithdrawalRef?: string | null }) => void;
 }) {
@@ -1360,19 +1372,6 @@ export function WalletPanel({
     return new Date(ms).toLocaleString();
   }, []);
 
-  const formatRelativePayoutTime = useCallback((timestamp?: number): string => {
-    if (!timestamp) return 'recently';
-    const ms = timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp;
-    const diffMs = Math.max(0, Date.now() - ms);
-    const diffMinutes = Math.floor(diffMs / 60_000);
-    if (diffMinutes < 1) return 'just now';
-    if (diffMinutes < 60) return `${diffMinutes}m ago`;
-    const diffHours = Math.floor(diffMinutes / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    const diffDays = Math.floor(diffHours / 24);
-    return `${diffDays}d ago`;
-  }, []);
-
   const truncateHash = useCallback((value: string): string => {
     return `${value.slice(0, 8)}...${value.slice(-6)}`;
   }, []);
@@ -1406,7 +1405,7 @@ export function WalletPanel({
           token,
           undefined,
           {
-            statuses: ['CREATED', 'PENDING_APPROVAL'],
+            statuses: WALLET_ACTIVE_PAYOUT_STATUSES,
             ...(debugEnabled
               ? {
                   debugTraceId: traceId,
@@ -1417,7 +1416,7 @@ export function WalletPanel({
           }
         );
         const claimable = response.payouts
-          .filter((item) => item.status !== 'EXPIRED')
+          .filter((item) => isWalletActivePayoutStatus(item.status))
           .sort((a, b) => {
             const priorityDiff =
               getWalletPayoutSortPriority(a.status) - getWalletPayoutSortPriority(b.status);
@@ -1502,6 +1501,35 @@ export function WalletPanel({
   );
 
   useEffect(() => {
+    if (!debugPreview) return;
+    const now = Date.now();
+    const statuses: PayoutPreview['status'][] = WALLET_ACTIVE_PAYOUT_STATUSES;
+    const mock = statuses.map((status, index) => ({
+      ...(status === 'CREATED'
+        ? {
+            payout_id: 'debug-payout-created',
+            claim_token: 'debug-claim-created',
+          }
+        : {}),
+      tournament_name: `Debug ${status}`,
+      asset: 'USDC',
+      chain: 'base',
+      amount_minor_units: (1_500_000 + index * 175_000),
+      amount_formatted: ((1_500_000 + index * 175_000) / 1_000_000).toFixed(2),
+      status,
+      expires_at: now + 60 * 60 * 1000,
+      created_at: now - (index + 6) * 60_000,
+      updated_at: now - (index + 1) * 60_000,
+      recipient_email: 'player@example.com',
+    }));
+    setClaimablePayouts(mock);
+    setClaimablePayoutsError(null);
+    setClaimablePayoutsLoading(false);
+    didInitialClaimableLoadRef.current = true;
+  }, [debugPreview]);
+
+  useEffect(() => {
+    if (debugPreview) return;
     if (!currentPrivyUserId) return;
     if (withdrawOpen) return;
     void loadClaimablePayouts(didInitialClaimableLoadRef.current ? 'background' : 'initial');
@@ -1509,7 +1537,7 @@ export function WalletPanel({
       void loadClaimablePayouts('background');
     }, 20_000);
     return () => window.clearInterval(timerId);
-  }, [currentPrivyUserId, loadClaimablePayouts, withdrawOpen]);
+  }, [currentPrivyUserId, debugPreview, loadClaimablePayouts, withdrawOpen]);
 
   useEffect(() => {
     return () => {
@@ -1918,8 +1946,6 @@ export function WalletPanel({
                     ? openPayoutExplorerUrl(item.chain, item.tx_hash)
                     : '';
                   const issuedDate = formatPayoutDate(item.created_at);
-                  const statusUpdatedAt = item.updated_at ?? item.created_at;
-                  const statusUpdatedLabel = formatRelativePayoutTime(statusUpdatedAt);
                   const rowHeight = 134;
 
                   return (
@@ -1977,26 +2003,7 @@ export function WalletPanel({
                                   {!isClaiming ? <CoinIcon /> : null}
                                   {isClaiming ? 'Claiming...' : 'Claim'}
                                 </button>
-                              ) : (
-                                <div
-                                  className={`relative mt-4 h-[50px] w-full overflow-hidden rounded-xl border text-sm font-semibold ${payoutStatusUi.pillContainerClassName}`}
-                                >
-                                  <span
-                                    aria-hidden="true"
-                                    className="pointer-events-none absolute left-1/2 top-1/2 h-4 w-px -translate-x-1/2 -translate-y-1/2 bg-white/10"
-                                  />
-                                  <div className="grid h-full grid-cols-2">
-                                    <span
-                                      className={`flex min-w-0 items-center justify-start px-4 text-sm leading-5 font-medium ${payoutStatusUi.pillTextClassName}`}
-                                    >
-                                      <span className="truncate">{walletStatusLabel}</span>
-                                    </span>
-                                    <span className="font-num flex items-center justify-end px-4 text-xs text-gray-200/75">
-                                      Updated {statusUpdatedLabel}
-                                    </span>
-                                  </div>
-                                </div>
-                              )}
+                              ) : null}
                             </div>
                           </div>
                           <div

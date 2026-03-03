@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useExportWallet, useModalStatus, usePrivy, useWallets } from '@privy-io/react-auth';
 import { ArrowLeft, Check, Copy, KeyRound, LogOut, Mail } from 'lucide-react';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
@@ -41,10 +41,13 @@ function SignInMethodIcon({ provider }: { provider: string }) {
 
 export default function AccountPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { wallets } = useWallets();
   const { ready, authenticated, user, logout } = usePrivy();
   const { exportWallet } = useExportWallet();
   const { isOpen: isPrivyModalOpen } = useModalStatus();
+  const debugRaw = searchParams.get('debug')?.trim().toLowerCase() ?? '';
+  const isDebugPreview = process.env.NODE_ENV !== 'production' && (debugRaw === '1' || debugRaw === 'true');
   const [copied, setCopied] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isExportingKey, setIsExportingKey] = useState(false);
@@ -81,13 +84,17 @@ export default function AccountPage() {
     if (hasEmail) return 'Email';
     return 'Other';
   }, [user?.linkedAccounts]);
+  const effectiveWalletAddress = walletAddress ?? (isDebugPreview ? '0xdebug000000000000000000000000000000000000' : null);
+  const effectiveEmailAddress = isDebugPreview && !authenticated ? 'player@example.com' : emailAddress;
+  const effectiveAuthProvider = isDebugPreview && !authenticated ? 'Debug preview' : authProvider;
 
   useEffect(() => {
+    if (isDebugPreview) return;
     if (!ready) return;
     if (!authenticated) {
       router.replace('/');
     }
-  }, [authenticated, ready, router]);
+  }, [authenticated, isDebugPreview, ready, router]);
 
   useEffect(() => {
     if (isPrivyModalOpen) return;
@@ -119,24 +126,28 @@ export default function AccountPage() {
   }, []);
 
   const handleCopyWalletAddress = useCallback(async () => {
-    if (!walletAddress) return;
-    const ok = await copyText(walletAddress);
+    if (!effectiveWalletAddress) return;
+    const ok = await copyText(effectiveWalletAddress);
     setCopied(ok);
     if (ok) {
       window.setTimeout(() => setCopied(false), 1800);
     }
-  }, [copyText, walletAddress]);
+  }, [copyText, effectiveWalletAddress]);
 
   const handleBack = useCallback(() => {
     if (window.history.length > 1) {
       router.back();
       return;
     }
-    router.replace('/app?tab=wallet');
-  }, [router]);
+    router.replace(isDebugPreview ? '/app?debug=1&tab=wallet' : '/app?tab=wallet');
+  }, [isDebugPreview, router]);
 
   const handleLogout = useCallback(async () => {
     if (isLoggingOut) return;
+    if (isDebugPreview && !authenticated) {
+      router.replace('/debug');
+      return;
+    }
     setIsLoggingOut(true);
     try {
       await logout();
@@ -144,9 +155,10 @@ export default function AccountPage() {
     } finally {
       setIsLoggingOut(false);
     }
-  }, [isLoggingOut, logout, router]);
+  }, [authenticated, isDebugPreview, isLoggingOut, logout, router]);
 
   const handleExportPrivateKey = useCallback(async () => {
+    if (!authenticated) return;
     if (!embeddedWalletAddress || isExportingKey) return;
     setIsExportingKey(true);
     try {
@@ -154,9 +166,9 @@ export default function AccountPage() {
     } finally {
       setIsExportingKey(false);
     }
-  }, [embeddedWalletAddress, exportWallet, isExportingKey]);
+  }, [authenticated, embeddedWalletAddress, exportWallet, isExportingKey]);
 
-  if (!ready) {
+  if (!ready && !isDebugPreview) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <LoadingSpinner size="lg" />
@@ -164,7 +176,7 @@ export default function AccountPage() {
     );
   }
 
-  if (!authenticated) {
+  if (!authenticated && !isDebugPreview) {
     return null;
   }
 
@@ -192,13 +204,13 @@ export default function AccountPage() {
               <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2.5">
                 <span
                   className={`inline-flex items-center text-sm text-gray-300 ${
-                    authProvider === 'Email' ? '' : 'gap-2'
+                    effectiveAuthProvider === 'Email' ? '' : 'gap-2'
                   }`}
                 >
-                  {authProvider === 'Email' ? null : <SignInMethodIcon provider={authProvider} />}
+                  {effectiveAuthProvider === 'Email' ? null : <SignInMethodIcon provider={effectiveAuthProvider} />}
                   Sign-in method
                 </span>
-                <span className="font-num text-right text-sm text-white">{authProvider}</span>
+                <span className="font-num text-right text-sm text-white">{effectiveAuthProvider}</span>
               </div>
               <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2.5">
                 <span className="inline-flex items-center gap-2 text-sm text-gray-300">
@@ -206,13 +218,13 @@ export default function AccountPage() {
                   Email
                 </span>
                 <span className="font-num max-w-[65%] truncate text-right text-sm text-white">
-                  {emailAddress}
+                  {effectiveEmailAddress}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2.5">
                 <div className="min-w-0">
                   <p className="font-num truncate text-base font-semibold leading-6 text-white">
-                    {walletAddress ? truncateAddress(walletAddress) : 'Not connected'}
+                    {effectiveWalletAddress ? truncateAddress(effectiveWalletAddress) : 'Not connected'}
                   </p>
                   <p className="text-[13px] text-gray-500">
                     {embeddedWalletAddress
@@ -223,7 +235,7 @@ export default function AccountPage() {
                 <button
                   type="button"
                   onClick={() => void handleCopyWalletAddress()}
-                  disabled={!walletAddress}
+                  disabled={!effectiveWalletAddress}
                   className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition ${
                     copied
                       ? 'border-emerald-300/45 bg-emerald-400/10 text-emerald-200'
