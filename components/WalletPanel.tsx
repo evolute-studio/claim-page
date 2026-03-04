@@ -51,6 +51,7 @@ import {
   toNumberSafe,
 } from '@/lib/withdraw';
 import type {
+  CreateWithdrawalResponse,
   DestinationChain,
   WithdrawalQuoteResponse,
 } from '@/types/withdrawal';
