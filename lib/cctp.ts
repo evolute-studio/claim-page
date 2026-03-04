@@ -34,12 +34,29 @@ export const SOURCE_DOMAIN_ID = 6;
 
 type CctpEnv = 'mainnet' | 'testnet';
 
-function getCctpEnv(): CctpEnv {
+function resolveCctpEnv(): { envMode: CctpEnv; envError: string | null } {
   const raw =
     process.env.NEXT_PUBLIC_CCTP_ENV ??
     process.env.NEXT_PUBLIC_ENVIRONMENT ??
     '';
-  return raw.toLowerCase() === 'testnet' ? 'testnet' : 'mainnet';
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'mainnet' || normalized === 'testnet') {
+    return { envMode: normalized, envError: null };
+  }
+  if (!normalized) {
+    return {
+      envMode: 'testnet',
+      envError: 'Missing NEXT_PUBLIC_CCTP_ENV (allowed: mainnet | testnet)',
+    };
+  }
+  return {
+    envMode: 'testnet',
+    envError: `Invalid NEXT_PUBLIC_CCTP_ENV "${raw}" (allowed: mainnet | testnet)`,
+  };
+}
+
+function getCctpEnv(): CctpEnv {
+  return resolveCctpEnv().envMode;
 }
 
 export function getSourceChain(): Chain {
@@ -69,7 +86,7 @@ function getDefaultUsdcAddress(sourceChainId: number): string | null {
 
 export function getCctpConfig() {
   const sourceChain = getSourceChain();
-  const envMode = getCctpEnv();
+  const { envMode, envError } = resolveCctpEnv();
   const usdcAddress =
     (envMode === 'testnet'
       ? process.env.NEXT_PUBLIC_CCTP_USDC_ADDRESS_TESTNET
@@ -90,6 +107,9 @@ export function getCctpConfig() {
     '';
 
   const errors: string[] = [];
+  if (envError) {
+    errors.push(envError);
+  }
   if (!usdcAddress) {
     errors.push('Missing USDC address for source chain');
   } else if (!isHexAddress(usdcAddress)) {

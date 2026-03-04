@@ -158,6 +158,19 @@ function mapWithdrawalCreateErrorMessage(error: WithdrawalApiError): string {
   }
 }
 
+function isUnsupportedDestinationChainError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const normalizedMessage = message.toLowerCase();
+  if (normalizedMessage.includes('unsupported destination chain')) {
+    return true;
+  }
+  if (error instanceof WithdrawalApiError) {
+    const code = error.code.toUpperCase();
+    return code.includes('UNSUPPORTED') && code.includes('CHAIN');
+  }
+  return false;
+}
+
 function VerticalDotsIcon() {
   return (
     <svg
@@ -1086,86 +1099,124 @@ export function WalletPanel({
               previous_quote_id: quoteIdForCreate,
             });
           }
-          const freshQuote = await getWithdrawalQuote(
-            token,
-            {
-              dest_chain: destination,
-              transfer_amount_usdc_minor: toNumberSafe(transferAmount),
-            }
-          );
-          quoteIdForCreate = freshQuote.quote_id;
-        }
-
-        if (!quoteIdForCreate) {
-          throw new Error('Quote expired. Please refresh.');
-        }
-
-        const baseIdempotencyBase = [
-          'withdraw',
-          activeWalletAddress.toLowerCase(),
-          String(config.sourceChain.id),
-          destination,
-          destinationAddressLower,
-          quoteIdForCreate,
-          String(toNumberSafe(transferAmount)),
-        ].join(':');
-        const baseCreateIdempotencyKey = `${baseIdempotencyBase}:create`;
-        const pendingCreateForKey =
-          pendingCreateRef.current?.createIdempotencyKey === baseCreateIdempotencyKey
-            ? pendingCreateRef.current
-            : null;
-        const canReusePendingCreate =
-          !!pendingCreateForKey &&
-          withdrawalId === pendingCreateForKey.withdrawalId &&
-          withdrawalStatus === 'CREATED' &&
-          !burnTxHash &&
-          !forwardTxHash;
-
-        if (WITHDRAW_DEBUG_ENABLED) {
-          pushDebug('api:create', 'Creating withdrawal before Base transfer signing', {
-            quote_id: quoteIdForCreate,
-            dest_address: destinationAddress.trim(),
-          });
-        }
-        const createResponse = canReusePendingCreate
-          ? {
-              withdrawal_id: pendingCreateForKey.withdrawalId,
-              status: 'CREATED' as const,
-            }
-          : await createWithdrawal(
+          try {
+            const freshQuote = await getWithdrawalQuote(
               token,
               {
-                quote_id: quoteIdForCreate,
-                dest_address: destinationAddress.trim(),
-                sponsor_mode: 'required',
-              },
-              baseCreateIdempotencyKey
+                dest_chain: destination,
+                transfer_amount_usdc_minor: toNumberSafe(transferAmount),
+              }
             );
+            quoteIdForCreate = freshQuote.quote_id;
+          } catch (quoteRefreshError) {
+            if (!isUnsupportedDestinationChainError(quoteRefreshError)) {
+              throw quoteRefreshError;
+            }
+            quoteIdForCreate = null;
+            if (WITHDRAW_DEBUG_ENABLED) {
+              pushDebug('api:quote-refresh:skip', 'Skipping backend tracking for Base transfer', {
+                reason: quoteRefreshError instanceof Error
+                  ? quoteRefreshError.message
+                  : String(quoteRefreshError),
+              });
+            }
+          }
+        }
+        let createResponse: { withdrawal_id: string; status: 'CREATED' } | CreateWithdrawalResponse | null = null;
+        let baseIdempotencyBase: string | null = null;
+        if (quoteIdForCreate) {
+          baseIdempotencyBase = [
+            'withdraw',
+            activeWalletAddress.toLowerCase(),
+            String(config.sourceChain.id),
+            destination,
+            destinationAddressLower,
+            quoteIdForCreate,
+            String(toNumberSafe(transferAmount)),
+          ].join(':');
+          const baseCreateIdempotencyKey = `${baseIdempotencyBase}:create`;
+          const pendingCreateForKey =
+            pendingCreateRef.current?.createIdempotencyKey === baseCreateIdempotencyKey
+              ? pendingCreateRef.current
+              : null;
+          const canReusePendingCreate =
+            !!pendingCreateForKey &&
+            withdrawalId === pendingCreateForKey.withdrawalId &&
+            withdrawalStatus === 'CREATED' &&
+            !burnTxHash &&
+            !forwardTxHash;
 
-        createdWithdrawalId = createResponse.withdrawal_id;
-        usedCreateIdempotencyKey = baseCreateIdempotencyKey;
-        pendingCreateRef.current = {
-          createIdempotencyKey: baseCreateIdempotencyKey,
-          withdrawalId: createResponse.withdrawal_id,
-        };
-        setWithdrawalId(createResponse.withdrawal_id);
-        setWithdrawalStatus(createResponse.status);
-        if (WITHDRAW_DEBUG_ENABLED) {
-          if (canReusePendingCreate) {
-            pushDebug('api:create', 'Reusing prepared withdrawal for Base transfer signing', {
-              withdrawal_id: createResponse.withdrawal_id,
-              status: createResponse.status,
-            });
-          } else {
-            pushDebug('api:create', 'Withdrawal created for Base transfer', {
-              withdrawal_id: createResponse.withdrawal_id,
-              status: createResponse.status,
+          if (WITHDRAW_DEBUG_ENABLED) {
+            pushDebug('api:create', 'Creating withdrawal before Base transfer signing', {
+              quote_id: quoteIdForCreate,
+              dest_address: destinationAddress.trim(),
             });
           }
+          try {
+            createResponse = canReusePendingCreate
+              ? {
+                  withdrawal_id: pendingCreateForKey.withdrawalId,
+                  status: 'CREATED' as const,
+                }
+              : await createWithdrawal(
+                  token,
+                  {
+                    quote_id: quoteIdForCreate,
+                    dest_address: destinationAddress.trim(),
+                    sponsor_mode: 'required',
+                  },
+                  baseCreateIdempotencyKey
+                );
+          } catch (createError) {
+            if (!isUnsupportedDestinationChainError(createError)) {
+              throw createError;
+            }
+            createResponse = null;
+            baseIdempotencyBase = null;
+            pendingCreateRef.current = null;
+            setWithdrawalId(null);
+            setWithdrawalStatus(null);
+            if (WITHDRAW_DEBUG_ENABLED) {
+              pushDebug('api:create:skip', 'Skipping backend tracking for Base transfer', {
+                reason: createError instanceof Error ? createError.message : String(createError),
+              });
+            }
+          }
+
+          if (createResponse) {
+            createdWithdrawalId = createResponse.withdrawal_id;
+            usedCreateIdempotencyKey = baseCreateIdempotencyKey;
+            pendingCreateRef.current = {
+              createIdempotencyKey: baseCreateIdempotencyKey,
+              withdrawalId: createResponse.withdrawal_id,
+            };
+            setWithdrawalId(createResponse.withdrawal_id);
+            setWithdrawalStatus(createResponse.status);
+            if (WITHDRAW_DEBUG_ENABLED) {
+              if (canReusePendingCreate) {
+                pushDebug('api:create', 'Reusing prepared withdrawal for Base transfer signing', {
+                  withdrawal_id: createResponse.withdrawal_id,
+                  status: createResponse.status,
+                });
+              } else {
+                pushDebug('api:create', 'Withdrawal created for Base transfer', {
+                  withdrawal_id: createResponse.withdrawal_id,
+                  status: createResponse.status,
+                });
+              }
+            }
+          }
+        } else {
+          pendingCreateRef.current = null;
+          setWithdrawalId(null);
+          setWithdrawalStatus(null);
+        }
+        if (WITHDRAW_DEBUG_ENABLED) {
           pushDebug('onchain:transfer', 'Sending Base transfer', {
             to: destinationAddress.trim(),
             amount_minor: transferAmount.toString(),
             token: config.usdcAddress,
+            tracked_by_backend: Boolean(createResponse),
           });
         }
 
@@ -1201,20 +1252,26 @@ export function WalletPanel({
           });
         }
 
-        const burnSubmitResponse = await submitBurnTx(
-          token,
-          createResponse.withdrawal_id,
-          transferTx.hash,
-          `${baseIdempotencyBase}:burn:${transferTx.hash.toLowerCase()}`
-        );
-        burnSubmittedToBackend = true;
-        pendingCreateRef.current = null;
-        setWithdrawalStatus(burnSubmitResponse.status);
-        if (WITHDRAW_DEBUG_ENABLED) {
-          pushDebug('api:burn-submitted', 'Base transfer tx hash submitted', {
-            withdrawal_id: createResponse.withdrawal_id,
+        if (createResponse && baseIdempotencyBase) {
+          const burnSubmitResponse = await submitBurnTx(
+            token,
+            createResponse.withdrawal_id,
+            transferTx.hash,
+            `${baseIdempotencyBase}:burn:${transferTx.hash.toLowerCase()}`
+          );
+          burnSubmittedToBackend = true;
+          pendingCreateRef.current = null;
+          setWithdrawalStatus(burnSubmitResponse.status);
+          if (WITHDRAW_DEBUG_ENABLED) {
+            pushDebug('api:burn-submitted', 'Base transfer tx hash submitted', {
+              withdrawal_id: createResponse.withdrawal_id,
+              tx_hash: transferTx.hash,
+              status: burnSubmitResponse.status,
+            });
+          }
+        } else if (WITHDRAW_DEBUG_ENABLED) {
+          pushDebug('api:burn-submitted:skip', 'Base transfer sent without backend tracking', {
             tx_hash: transferTx.hash,
-            status: burnSubmitResponse.status,
           });
         }
 
