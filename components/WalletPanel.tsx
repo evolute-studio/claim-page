@@ -53,6 +53,7 @@ import {
 import type {
   CreateWithdrawalResponse,
   DestinationChain,
+  WithdrawalSponsorMode,
   WithdrawalQuoteResponse,
 } from '@/types/withdrawal';
 import type { PayoutPreview } from '@/types/payout';
@@ -168,6 +169,25 @@ function isUnsupportedDestinationChainError(error: unknown): boolean {
   if (error instanceof WithdrawalApiError) {
     const code = error.code.toUpperCase();
     return code.includes('UNSUPPORTED') && code.includes('CHAIN');
+  }
+  return false;
+}
+
+function isSponsorUnavailableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const normalizedMessage = message.toLowerCase();
+  if (normalizedMessage.includes('sponsor') && normalizedMessage.includes('unavailable')) {
+    return true;
+  }
+  if (error instanceof WithdrawalApiError) {
+    const code = error.code.toUpperCase();
+    if (!code.includes('SPONSOR')) return false;
+    return (
+      code.includes('UNAVAILABLE') ||
+      code.includes('NOT_AVAILABLE') ||
+      code.includes('REQUIRED') ||
+      code.includes('FAILED')
+    );
   }
   return false;
 }
@@ -488,7 +508,11 @@ export function WalletPanel({
   const lastHandledClaimableFocusSignatureRef = useRef<string | null>(null);
   const networkIconsPreloadedRef = useRef(false);
   const submitInFlightRef = useRef(false);
-  const pendingCreateRef = useRef<{ createIdempotencyKey: string; withdrawalId: string } | null>(null);
+  const pendingCreateRef = useRef<{
+    createIdempotencyKey: string;
+    withdrawalId: string;
+    sponsorMode?: WithdrawalSponsorMode | null;
+  } | null>(null);
   const pendingCancelRef = useRef<{
     withdrawalId: string;
     reason: string;
@@ -1190,6 +1214,7 @@ export function WalletPanel({
             pendingCreateRef.current = {
               createIdempotencyKey: baseCreateIdempotencyKey,
               withdrawalId: createResponse.withdrawal_id,
+              sponsorMode: createResponse.sponsor_mode ?? null,
             };
             setWithdrawalId(createResponse.withdrawal_id);
             setWithdrawalStatus(createResponse.status);
@@ -1312,8 +1337,11 @@ export function WalletPanel({
           dest_address: destinationAddress.trim(),
         });
       }
+      const noSponsorCreateIdempotencyKey = `${createIdempotencyKey}:nosponsor`;
       const pendingCreateForKey =
-        pendingCreateRef.current?.createIdempotencyKey === createIdempotencyKey
+        pendingCreateRef.current &&
+        (pendingCreateRef.current.createIdempotencyKey === createIdempotencyKey ||
+          pendingCreateRef.current.createIdempotencyKey === noSponsorCreateIdempotencyKey)
           ? pendingCreateRef.current
           : null;
       const canReusePendingCreate =
@@ -1322,27 +1350,61 @@ export function WalletPanel({
         withdrawalStatus === 'CREATED' &&
         !burnTxHash &&
         !forwardTxHash;
+      let createIdempotencyKeyForRequest = createIdempotencyKey;
+      let createSponsorMode: WithdrawalSponsorMode = 'auto';
       const createResponse = canReusePendingCreate
         ? {
             withdrawal_id: pendingCreateForKey.withdrawalId,
             status: 'CREATED' as const,
+            sponsor_mode: pendingCreateForKey.sponsorMode ?? undefined,
           }
-        : await createWithdrawal(
-            token,
-            {
-              quote_id: quote.quote_id,
-              dest_address: destinationAddress.trim(),
-              sponsor_mode: 'required',
-            },
-            createIdempotencyKey
-          );
+        : await (async () => {
+            try {
+              createSponsorMode = 'auto';
+              createIdempotencyKeyForRequest = createIdempotencyKey;
+              return await createWithdrawal(
+                token,
+                {
+                  quote_id: quote.quote_id,
+                  dest_address: destinationAddress.trim(),
+                  sponsor_mode: 'auto',
+                },
+                createIdempotencyKeyForRequest
+              );
+            } catch (createError) {
+              if (!isSponsorUnavailableError(createError)) {
+                throw createError;
+              }
+              createSponsorMode = 'none';
+              createIdempotencyKeyForRequest = noSponsorCreateIdempotencyKey;
+              if (WITHDRAW_DEBUG_ENABLED) {
+                pushDebug('api:create:fallback', 'Retrying create without sponsorship', {
+                  reason: createError instanceof Error ? createError.message : String(createError),
+                });
+              }
+              return createWithdrawal(
+                token,
+                {
+                  quote_id: quote.quote_id,
+                  dest_address: destinationAddress.trim(),
+                  sponsor_mode: 'none',
+                },
+                createIdempotencyKeyForRequest
+              );
+            }
+          })();
 
       createdWithdrawalId = createResponse.withdrawal_id;
-      usedCreateIdempotencyKey = createIdempotencyKey;
+      usedCreateIdempotencyKey = createIdempotencyKeyForRequest;
       pendingCreateRef.current = {
-        createIdempotencyKey,
+        createIdempotencyKey: createIdempotencyKeyForRequest,
         withdrawalId: createResponse.withdrawal_id,
+        sponsorMode:
+          createResponse.sponsor_mode ?? (canReusePendingCreate ? pendingCreateForKey?.sponsorMode ?? null : createSponsorMode),
       };
+      const shouldSponsorTransactions =
+        (createResponse.sponsor_mode ??
+          (canReusePendingCreate ? pendingCreateForKey?.sponsorMode ?? null : createSponsorMode)) !== 'none';
       setWithdrawalId(createResponse.withdrawal_id);
       setWithdrawalStatus(createResponse.status);
       if (WITHDRAW_DEBUG_ENABLED) {
@@ -1350,11 +1412,13 @@ export function WalletPanel({
           pushDebug('api:create', 'Reusing prepared withdrawal before on-chain signing', {
             withdrawal_id: createResponse.withdrawal_id,
             status: createResponse.status,
+            sponsor_mode: createResponse.sponsor_mode ?? pendingCreateForKey?.sponsorMode ?? null,
           });
         } else {
           pushDebug('api:create', 'Withdrawal created', {
             withdrawal_id: createResponse.withdrawal_id,
             status: createResponse.status,
+            sponsor_mode: createResponse.sponsor_mode ?? createSponsorMode,
           });
         }
       }
@@ -1400,7 +1464,7 @@ export function WalletPanel({
           },
           {
             address: activeWalletAddress as `0x${string}`,
-            sponsor: true,
+            sponsor: shouldSponsorTransactions,
             uiOptions: {
               ...buildTxUiOptions({ mode: 'approve' }),
               showWalletUIs,
@@ -1447,7 +1511,7 @@ export function WalletPanel({
         },
         {
           address: activeWalletAddress as `0x${string}`,
-          sponsor: true,
+          sponsor: shouldSponsorTransactions,
           uiOptions: {
             ...buildTxUiOptions({
               mode: 'burn',
