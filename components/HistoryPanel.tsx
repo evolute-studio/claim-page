@@ -727,6 +727,9 @@ export function HistoryPanel({
                     const destinationValue = item.dest_address
                       ? `${destinationLabel} • ${truncateAddress(item.dest_address)}`
                       : destinationLabel;
+                    const isDirectTransfer =
+                      item.flow_type === 'direct' ||
+                      (item.dest_chain === 'base' && !item.forward_tx_hash);
 
                     return (
                       <div
@@ -807,7 +810,7 @@ export function HistoryPanel({
                                 </div>
                                 {item.burn_tx_hash ? (
                                   <div className="space-y-1">
-                                    <p className="text-gray-500">Burn tx</p>
+                                    <p className="text-gray-500">{isDirectTransfer ? 'Transfer tx' : 'Burn tx'}</p>
                                     <a
                                       href={`${baseExplorer}${item.burn_tx_hash}`}
                                       target="_blank"

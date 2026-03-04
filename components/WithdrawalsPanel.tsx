@@ -12,7 +12,7 @@ import { WithdrawalStatusBadge } from '@/components/WithdrawalStatusBadge';
 const FILTERS: Array<{ label: string; value: 'ALL' | WithdrawalStatus }> = [
   { label: 'All', value: 'ALL' },
   { label: 'Pending', value: 'FORWARDING_PENDING' },
-  { label: 'Completed', value: 'MINTED' },
+  { label: 'TRANSFERED', value: 'MINTED' },
   { label: 'Failed', value: 'FAILED' },
   { label: 'Expired', value: 'EXPIRED' },
 ];
@@ -115,6 +115,14 @@ export function WithdrawalsPanel() {
 
   const visibleWithdrawals = useMemo(() => {
     if (activeFilter === 'ALL') return withdrawals;
+    if (activeFilter === 'FORWARDING_PENDING') {
+      return withdrawals.filter(
+        (item) =>
+          item.status === 'CREATED' ||
+          item.status === 'BURN_SUBMITTED' ||
+          item.status === 'FORWARDING_PENDING'
+      );
+    }
     return withdrawals.filter((item) => item.status === activeFilter);
   }, [activeFilter, withdrawals]);
 
@@ -127,6 +135,11 @@ export function WithdrawalsPanel() {
     const match = destinations.find((item) => item.key === chain);
     return match?.explorerTxBase ?? null;
   };
+  const selectedIsDirectTransfer = Boolean(
+    selected &&
+      (selected.flow_type === 'direct' ||
+        (selected.dest_chain === 'base' && !selected.forward_tx_hash))
+  );
 
   return (
     <section className="flex h-full min-h-0 w-full flex-col gap-4 rounded-2xl border border-white/10 bg-[#111111] p-5 animate-fade-in-up">
@@ -250,7 +263,7 @@ export function WithdrawalsPanel() {
                 <p className="text-gray-200">{formatDate(selected.updated_at)}</p>
               </div>
               <div>
-                <p className="text-gray-500">Burned</p>
+                <p className="text-gray-500">{selectedIsDirectTransfer ? 'Transferred' : 'Burned'}</p>
                 <p className="text-gray-200">{formatDate(selected.burn_tx_at)}</p>
               </div>
               <div>
@@ -261,7 +274,7 @@ export function WithdrawalsPanel() {
 
             {selected.burn_tx_hash && (
               <div>
-                <p className="text-xs text-gray-500 mb-1">Burn tx</p>
+                <p className="text-xs text-gray-500 mb-1">{selectedIsDirectTransfer ? 'Transfer tx' : 'Burn tx'}</p>
                 <p className="text-xs text-gray-300 break-all">{truncateHash(selected.burn_tx_hash)}</p>
                 <a
                   href={`${baseExplorer}${selected.burn_tx_hash}`}

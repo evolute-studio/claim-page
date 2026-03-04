@@ -18,7 +18,7 @@ const statusConfig: Record<WithdrawalStatus, { text: string; className: string }
     className: 'bg-[rgba(245,158,11,0.16)] text-[#f6d88f] border-[rgba(245,158,11,0.34)]',
   },
   MINTED: {
-    text: 'Completed',
+    text: 'TRANSFERED',
     className: 'bg-[rgba(16,185,129,0.16)] text-[#9ee6cb] border-[rgba(16,185,129,0.34)]',
   },
   FAILED: {

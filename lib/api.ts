@@ -10,6 +10,7 @@ import type {
   CancelWithdrawalResponse,
   CreateWithdrawalResponse,
   DestinationChain,
+  WithdrawalFlowType,
   WithdrawalSponsorMode,
   WithdrawalQuoteResponse,
   WithdrawalListItem,
@@ -343,12 +344,13 @@ Quote:
 
 Withdrawal list/status:
 - id -> withdrawal_id
+- flow_type -> flow_type
 - transfer_amount_usdc_minor -> amount_minor / net_amount_minor
 - total_burn_usdc_minor -> total_amount_minor (optional)
 - max_fee_usdc_minor -> total_fee_minor
 - fee_protocol_usdc_minor -> bridge_fee_minor
 - fee_forward_usdc_minor -> forward_fee_minor
-- burn_tx_hash -> burn_tx_hash
+- burn_tx_hash -> burn_tx_hash / transfer_tx_hash / tx_hash
 - forward_tx_hash -> forward_tx_hash
 - failure_reason -> error_msg / error
 - created_at / updated_at -> Unix ms
@@ -371,6 +373,11 @@ function toUiDestChain(chain: unknown, fallback: DestinationChain): DestinationC
   return fallback;
 }
 
+function toWithdrawalFlowType(value: unknown): WithdrawalFlowType | undefined {
+  if (value === 'bridge' || value === 'direct') return value;
+  return undefined;
+}
+
 function toNumber(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim()) {
@@ -385,6 +392,7 @@ function normalizeWithdrawalQuote(
   fallbackDestChain: DestinationChain
 ): WithdrawalQuoteResponse {
   const destChain = toUiDestChain(raw.dest_chain, fallbackDestChain);
+  const flowType = toWithdrawalFlowType(raw.flow_type ?? raw.flowType);
   const destDomainId =
     toNumber(raw.dest_domain_id ?? raw.destDomainId) || DEST_DOMAIN_BY_CHAIN[destChain];
 
@@ -406,6 +414,7 @@ function normalizeWithdrawalQuote(
 
   return {
     quote_id: quoteId,
+    flow_type: flowType,
     source_chain: 'base',
     source_domain_id: 6,
     dest_chain: destChain,
@@ -424,6 +433,7 @@ function normalizeWithdrawalQuote(
 function normalizeWithdrawal(raw: Record<string, unknown>): WithdrawalListItem | null {
   const id = readStringField(raw, ['withdrawal_id', 'id', 'withdrawalId']);
   const status = readStringField(raw, ['status', 'state']) as WithdrawalListItem['status'] | undefined;
+  const flowType = toWithdrawalFlowType(raw.flow_type ?? raw.flowType);
   const destChain = toUiDestChain(raw.dest_chain ?? raw.chain, 'ethereum');
 
   if (!id || !status) return null;
@@ -441,10 +451,16 @@ function normalizeWithdrawal(raw: Record<string, unknown>): WithdrawalListItem |
     toNumber(raw.max_fee_usdc_minor ?? raw.total_fee_minor) || feeProtocol + feeForward;
   const totalBurn =
     toNumber(raw.total_burn_usdc_minor ?? raw.total_amount_minor) || transferAmount + maxFee;
+  const transferTxHash = readStringField(raw, ['transfer_tx_hash', 'transferTxHash']);
+  const burnTxHash =
+    readStringField(raw, ['burn_tx_hash', 'burnTxHash', 'tx_hash']) ?? transferTxHash ?? null;
+  const burnTxAt =
+    toNumber(raw.burn_tx_at ?? raw.burnTxAt ?? raw.transfer_tx_at ?? raw.transferTxAt) || null;
 
   return {
     id,
     status,
+    flow_type: flowType,
     dest_chain: destChain,
     dest_address: readStringField(raw, ['dest_address', 'destination_address', 'to', 'recipient']) ?? null,
     transfer_amount_usdc_minor: transferAmount,
@@ -452,11 +468,12 @@ function normalizeWithdrawal(raw: Record<string, unknown>): WithdrawalListItem |
     max_fee_usdc_minor: maxFee,
     fee_forward_usdc_minor: feeForward,
     fee_protocol_usdc_minor: feeProtocol,
-    burn_tx_hash: readStringField(raw, ['burn_tx_hash', 'burnTxHash', 'tx_hash']) ?? null,
+    burn_tx_hash: burnTxHash,
+    transfer_tx_hash: transferTxHash ?? burnTxHash,
     forward_tx_hash: readStringField(raw, ['forward_tx_hash', 'forwardTxHash']) ?? null,
     created_at: toNumber(raw.created_at ?? raw.createdAt) || null,
     updated_at: toNumber(raw.updated_at ?? raw.updatedAt) || null,
-    burn_tx_at: toNumber(raw.burn_tx_at ?? raw.burnTxAt) || null,
+    burn_tx_at: burnTxAt,
     forward_tx_at: toNumber(raw.forward_tx_at ?? raw.forwardTxAt) || null,
     failure_reason:
       readStringField(raw, ['failure_reason', 'failureReason', 'error', 'error_msg']) ?? null,
@@ -468,13 +485,19 @@ function normalizeWithdrawalStatus(
 ): WithdrawalStatusResponse {
   const id = readStringField(raw, ['withdrawal_id', 'id', 'withdrawalId']);
   const status = readStringField(raw, ['status', 'state']) as WithdrawalStatusResponse['status'] | undefined;
+  const flowType = toWithdrawalFlowType(raw.flow_type ?? raw.flowType);
+  const transferTxHash = readStringField(raw, ['transfer_tx_hash', 'transferTxHash']);
+  const burnTxHash =
+    readStringField(raw, ['burn_tx_hash', 'burnTxHash', 'tx_hash']) ?? transferTxHash ?? null;
   if (!id || !status) {
     throw new Error('Invalid withdrawal status response');
   }
   return {
     id,
     status,
-    burn_tx_hash: readStringField(raw, ['burn_tx_hash', 'burnTxHash', 'tx_hash']) ?? null,
+    flow_type: flowType,
+    burn_tx_hash: burnTxHash,
+    transfer_tx_hash: transferTxHash ?? burnTxHash,
     forward_tx_hash: readStringField(raw, ['forward_tx_hash', 'forwardTxHash']) ?? null,
     failure_reason:
       readStringField(raw, ['failure_reason', 'failureReason', 'error', 'error_msg']) ?? null,

@@ -9,6 +9,7 @@ export type DestinationChain =
 
 export type ForwardFeeLevel = 'low' | 'med' | 'high';
 export type WithdrawalSponsorMode = 'none' | 'auto' | 'required';
+export type WithdrawalFlowType = 'bridge' | 'direct';
 
 export type WithdrawalStatus =
   | 'CREATED'
@@ -20,6 +21,7 @@ export type WithdrawalStatus =
 
 export interface WithdrawalQuoteResponse {
   quote_id: string;
+  flow_type?: WithdrawalFlowType;
   source_chain: 'base';
   source_domain_id: number;
   dest_chain: DestinationChain;
@@ -37,6 +39,7 @@ export interface WithdrawalQuoteResponse {
 export interface CreateWithdrawalResponse {
   withdrawal_id: string;
   status: WithdrawalStatus;
+  flow_type?: WithdrawalFlowType;
   sponsor_mode?: WithdrawalSponsorMode;
   sponsor_reason?: string | null;
 }
@@ -54,7 +57,9 @@ export interface CancelWithdrawalResponse {
 export interface WithdrawalStatusResponse {
   id: string;
   status: WithdrawalStatus;
+  flow_type?: WithdrawalFlowType;
   burn_tx_hash?: string | null;
+  transfer_tx_hash?: string | null;
   forward_tx_hash?: string | null;
   failure_reason?: string | null;
 }
@@ -62,6 +67,7 @@ export interface WithdrawalStatusResponse {
 export interface WithdrawalListItem {
   id: string;
   status: WithdrawalStatus;
+  flow_type?: WithdrawalFlowType;
   dest_chain: DestinationChain;
   dest_address?: string | null;
   transfer_amount_usdc_minor: number;
@@ -70,6 +76,7 @@ export interface WithdrawalListItem {
   fee_forward_usdc_minor?: number | null;
   fee_protocol_usdc_minor?: number | null;
   burn_tx_hash?: string | null;
+  transfer_tx_hash?: string | null;
   forward_tx_hash?: string | null;
   created_at?: number | null;
   updated_at?: number | null;
