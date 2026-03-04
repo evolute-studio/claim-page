@@ -7,8 +7,10 @@ import {
 } from '@/types/payout';
 import type {
   BurnSubmittedResponse,
+  CancelWithdrawalResponse,
   CreateWithdrawalResponse,
   DestinationChain,
+  WithdrawalSponsorMode,
   WithdrawalQuoteResponse,
   WithdrawalListItem,
   WithdrawalListResponse,
@@ -19,6 +21,7 @@ import { readJwtSub } from '@/lib/identityToken';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL;
 const WALLET_REQUEST_TIMEOUT_MS = 8_000;
+const WITHDRAWAL_REQUEST_TIMEOUT_MS = 12_000;
 
 export type WalletSessionConflictPolicy =
   | 'prompt_switch'
@@ -94,6 +97,18 @@ export class WalletApiError extends Error {
   }
 }
 
+export class WithdrawalApiError extends Error {
+  code: string;
+  status: number;
+
+  constructor(message: string, code = 'INTERNAL_ERROR', status = 0) {
+    super(message);
+    this.name = 'WithdrawalApiError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
 function readWalletErrorCode(raw: unknown): WalletExchangeErrorCode {
   if (typeof raw !== 'string') return 'INTERNAL_ERROR';
   if (
@@ -145,6 +160,39 @@ function readWalletErrorCodeFromPayload(payload: unknown): WalletExchangeErrorCo
   return readWalletErrorCode(directCode);
 }
 
+function readWithdrawalErrorMessage(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== 'object') return fallback;
+  const record = payload as Record<string, unknown>;
+  const nestedError = record.error;
+  if (nestedError && typeof nestedError === 'object') {
+    const message = (nestedError as Record<string, unknown>).message;
+    if (typeof message === 'string' && message.trim()) {
+      return message.trim();
+    }
+  }
+  if (typeof record.message === 'string' && record.message.trim()) {
+    return record.message.trim();
+  }
+  return fallback;
+}
+
+function readWithdrawalErrorCodeFromPayload(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return 'INTERNAL_ERROR';
+  const record = payload as Record<string, unknown>;
+  const nestedError = record.error;
+  if (nestedError && typeof nestedError === 'object') {
+    const nestedCode = (nestedError as Record<string, unknown>).code;
+    if (typeof nestedCode === 'string' && nestedCode.trim()) {
+      return nestedCode.trim();
+    }
+  }
+  const directCode = record.error_code ?? record.code;
+  if (typeof directCode === 'string' && directCode.trim()) {
+    return directCode.trim();
+  }
+  return 'INTERNAL_ERROR';
+}
+
 async function fetchWalletJson<T>(
   path: string,
   init: RequestInit,
@@ -178,6 +226,23 @@ async function fetchWalletJson<T>(
       throw new WalletApiError('Request timed out. Please try again.', 'TIMEOUT');
     }
     throw new WalletApiError('Network error. Check connection and try again.', 'NETWORK_ERROR');
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(timeoutId);
   }
@@ -719,14 +784,26 @@ export async function getWithdrawalQuote(
     dest_chain: toApiDestChain(payload.dest_chain),
     amount_minor: payload.transfer_amount_usdc_minor,
   };
-  const res = await fetch(`${apiBase}/withdrawal/quote`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...getAuthHeaders(privyIdentityToken),
-    },
-    body: JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      `${apiBase}/withdrawal/quote`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(privyIdentityToken),
+        },
+        body: JSON.stringify(body),
+      },
+      WITHDRAWAL_REQUEST_TIMEOUT_MS
+    );
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Quote request timed out. Please try again.');
+    }
+    throw new Error('Network error. Check connection and try again.');
+  }
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -743,6 +820,7 @@ export async function createWithdrawal(
   payload: {
     quote_id: string;
     dest_address: string;
+    sponsor_mode?: WithdrawalSponsorMode;
   },
   idempotencyKey?: string
 ): Promise<CreateWithdrawalResponse> {
@@ -755,15 +833,29 @@ export async function createWithdrawal(
     headers['Idempotency-Key'] = idempotencyKey;
   }
 
-  const res = await fetch(`${apiBase}/withdrawal/create`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      `${apiBase}/withdrawal/create`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      },
+      WITHDRAWAL_REQUEST_TIMEOUT_MS
+    );
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new WithdrawalApiError('Request timed out. Please try again.', 'TIMEOUT');
+    }
+    throw new WithdrawalApiError('Network error. Check connection and try again.', 'NETWORK_ERROR');
+  }
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.message || 'Failed to create withdrawal');
+    const code = readWithdrawalErrorCodeFromPayload(data);
+    const message = readWithdrawalErrorMessage(data, 'Failed to create withdrawal');
+    throw new WithdrawalApiError(message, code, res.status);
   }
   return data;
 }
@@ -783,21 +875,72 @@ export async function submitBurnTx(
     headers['Idempotency-Key'] = idempotencyKey;
   }
 
-  const res = await fetch(`${apiBase}/withdrawal/burn-submitted`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      burn_tx_hash: burnTxHash,
-      withdrawal_id: withdrawalId,
-      id: withdrawalId,
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      `${apiBase}/withdrawal/burn-submitted`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          burn_tx_hash: burnTxHash,
+          withdrawal_id: withdrawalId,
+          id: withdrawalId,
+        }),
+      },
+      WITHDRAWAL_REQUEST_TIMEOUT_MS
+    );
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Submit transaction request timed out. Please try again.');
+    }
+    throw new Error('Network error. Check connection and try again.');
+  }
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.message || 'Failed to submit burn transaction');
   }
   return data;
+}
+
+export async function cancelWithdrawal(
+  privyIdentityToken: string,
+  payload: {
+    withdrawal_id: string;
+    reason: string;
+    idempotency_key?: string;
+  }
+): Promise<CancelWithdrawalResponse> {
+  const apiBase = getApiBaseOrThrow();
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      `${apiBase}/withdrawal/cancel`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(privyIdentityToken),
+        },
+        body: JSON.stringify(payload),
+      },
+      WITHDRAWAL_REQUEST_TIMEOUT_MS
+    );
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new WithdrawalApiError('Request timed out. Please try again.', 'TIMEOUT');
+    }
+    throw new WithdrawalApiError('Network error. Check connection and try again.', 'NETWORK_ERROR');
+  }
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const code = readWithdrawalErrorCodeFromPayload(data);
+    const message = readWithdrawalErrorMessage(data, 'Failed to cancel withdrawal');
+    throw new WithdrawalApiError(message, code, res.status);
+  }
+  return data as CancelWithdrawalResponse;
 }
 
 export async function getWithdrawalStatus(
@@ -809,9 +952,21 @@ export async function getWithdrawalStatus(
     id: withdrawalId,
     withdrawal_id: withdrawalId,
   }).toString();
-  const res = await fetch(`${apiBase}/withdrawal/get?${query}`, {
-    headers: getAuthHeaders(privyIdentityToken),
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      `${apiBase}/withdrawal/get?${query}`,
+      {
+        headers: getAuthHeaders(privyIdentityToken),
+      },
+      WITHDRAWAL_REQUEST_TIMEOUT_MS
+    );
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Status request timed out. Please try again.');
+    }
+    throw new Error('Network error. Check connection and try again.');
+  }
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -829,9 +984,21 @@ export async function getMyWithdrawals(
 ): Promise<WithdrawalListResponse> {
   const apiBase = getApiBaseOrThrow();
   const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
-  const res = await fetch(`${apiBase}/withdrawal/list${query}`, {
-    headers: getAuthHeaders(privyIdentityToken),
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      `${apiBase}/withdrawal/list${query}`,
+      {
+        headers: getAuthHeaders(privyIdentityToken),
+      },
+      WITHDRAWAL_REQUEST_TIMEOUT_MS
+    );
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Withdrawals list request timed out. Please try again.');
+    }
+    throw new Error('Network error. Check connection and try again.');
+  }
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

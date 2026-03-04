@@ -30,7 +30,9 @@ export function useWithdrawBalance({
     const fetchBalance = async () => {
       if (!activeWalletAddress || !usdcAddress || !readBalance) {
         setBalance(null);
+        setBalanceMinor(null);
         setBalanceError(null);
+        setBalanceLoading(false);
         return;
       }
 
@@ -46,6 +48,8 @@ export function useWithdrawBalance({
       } catch (error) {
         if (!cancelled) {
           const message = error instanceof Error ? error.message : 'Failed to load balance';
+          setBalance(null);
+          setBalanceMinor(null);
           setBalanceError(message);
         }
       } finally {

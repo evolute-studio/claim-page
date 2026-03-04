@@ -8,6 +8,7 @@ export type DestinationChain =
   | 'linea';
 
 export type ForwardFeeLevel = 'low' | 'med' | 'high';
+export type WithdrawalSponsorMode = 'none' | 'auto' | 'required';
 
 export type WithdrawalStatus =
   | 'CREATED'
@@ -36,10 +37,18 @@ export interface WithdrawalQuoteResponse {
 export interface CreateWithdrawalResponse {
   withdrawal_id: string;
   status: WithdrawalStatus;
+  sponsor_mode?: WithdrawalSponsorMode;
+  sponsor_reason?: string | null;
 }
 
 export interface BurnSubmittedResponse {
   status: WithdrawalStatus;
+}
+
+export interface CancelWithdrawalResponse {
+  status: string;
+  reservation_released?: boolean;
+  message?: string;
 }
 
 export interface WithdrawalStatusResponse {

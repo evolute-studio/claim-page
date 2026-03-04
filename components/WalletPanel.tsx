@@ -21,11 +21,13 @@ import {
   parseUnits,
 } from 'viem';
 import {
+  cancelWithdrawal,
   confirmClaim,
   confirmClaimByPayoutId,
   createWithdrawal,
   getMyPayouts,
   getWithdrawalQuote,
+  WithdrawalApiError,
   submitBurnTx,
 } from '@/lib/api';
 import { getCctpConfig, getDestinationChains, getDestinationConfig } from '@/lib/cctp';
@@ -113,6 +115,47 @@ function getAmountFontSize(displayValue: string): string {
   const bucket = Math.floor((length - 1) / bucketSize);
   const size = maxSize / (1 + bucket * 0.28);
   return `${size}rem`;
+}
+
+function mapWithdrawalCreateErrorMessage(error: WithdrawalApiError): string {
+  const code = error.code.toUpperCase();
+
+  switch (code) {
+    case 'SPONSOR_LIMIT_EXCEEDED':
+    case 'SPONSORED_LIMIT_EXCEEDED':
+    case 'SPONSOR_BUDGET_EXCEEDED':
+    case 'SPONSOR_AMOUNT_EXCEEDED':
+      return 'Sponsored withdrawal limit reached. Try a smaller amount.';
+    case 'SPONSOR_MIN_WITHDRAW_NOT_MET':
+    case 'SPONSOR_MIN_AMOUNT_NOT_MET':
+    case 'SPONSORED_MIN_WITHDRAW_NOT_MET':
+    case 'SPONSORED_MIN_AMOUNT_NOT_MET':
+      return 'Amount is below the minimum for sponsored withdrawals.';
+    case 'SPONSOR_TX_LIMIT_REACHED':
+    case 'SPONSOR_RATE_LIMIT_EXCEEDED':
+    case 'SPONSORED_TX_LIMIT_REACHED':
+    case 'RATE_LIMITED':
+      return 'Too many sponsored withdrawal attempts. Please try again later.';
+    case 'SPONSOR_REQUIRED_NOT_AVAILABLE':
+    case 'SPONSOR_REQUIRED_UNAVAILABLE':
+    case 'SPONSOR_REQUIRED_FAILED':
+    case 'SPONSOR_UNAVAILABLE':
+      return 'Sponsored withdrawals are temporarily unavailable.';
+    default:
+      if (code.includes('SPONSOR') && code.includes('MIN')) {
+        return 'Amount is below the minimum for sponsored withdrawals.';
+      }
+      if (code.includes('SPONSOR') && code.includes('LIMIT')) {
+        return 'Sponsored withdrawal limit reached. Try a smaller amount.';
+      }
+      if (code.includes('SPONSOR') && code.includes('RATE')) {
+        return 'Too many sponsored withdrawal attempts. Please try again later.';
+      }
+      if (code.includes('SPONSOR')) {
+        return 'Sponsored withdrawal is unavailable for this request.';
+      }
+      return error.message;
+  }
 }
 
 function VerticalDotsIcon() {
@@ -431,6 +474,12 @@ export function WalletPanel({
   const lastHandledClaimableFocusSignatureRef = useRef<string | null>(null);
   const networkIconsPreloadedRef = useRef(false);
   const submitInFlightRef = useRef(false);
+  const pendingCreateRef = useRef<{ createIdempotencyKey: string; withdrawalId: string } | null>(null);
+  const pendingCancelRef = useRef<{
+    withdrawalId: string;
+    reason: string;
+    idempotencyKey: string;
+  } | null>(null);
 
   const pushDebug = useCallback(
     (stage: string, message: string, data?: Record<string, unknown>) => {
@@ -844,6 +893,8 @@ export function WalletPanel({
   };
 
   const resetFlow = () => {
+    pendingCreateRef.current = null;
+    pendingCancelRef.current = null;
     resetWithdrawalTracking();
     setFormError(null);
     setSending(false);
@@ -875,8 +926,10 @@ export function WalletPanel({
     submitInFlightRef.current = true;
     setFormError(null);
     let createdWithdrawalId: string | null = null;
+    let usedCreateIdempotencyKey: string | null = null;
     let burnTxHashLocal: string | null = null;
     let burnSubmittedToBackend = false;
+    let cancelCleanupMessage: string | null = null;
     try {
       if (WITHDRAW_DEBUG_ENABLED) {
         pushDebug('submit', 'Submitting withdrawal', {
@@ -977,6 +1030,42 @@ export function WalletPanel({
       const createIdempotencyKey = `${idempotencyBase}:create`;
 
       setSending(true);
+      const token = await getAuthToken();
+      if (pendingCancelRef.current) {
+        const pendingCancel = pendingCancelRef.current;
+        try {
+          if (WITHDRAW_DEBUG_ENABLED) {
+            pushDebug('api:cancel:retry', 'Retrying pending cancellation before new submit', {
+              withdrawal_id: pendingCancel.withdrawalId,
+              reason: pendingCancel.reason,
+            });
+          }
+          const cancelResponse = await cancelWithdrawal(token, {
+            withdrawal_id: pendingCancel.withdrawalId,
+            reason: pendingCancel.reason,
+            idempotency_key: pendingCancel.idempotencyKey,
+          });
+          pendingCancelRef.current = null;
+          if (WITHDRAW_DEBUG_ENABLED) {
+            pushDebug('api:cancel:retry', 'Pending cancellation completed', {
+              withdrawal_id: pendingCancel.withdrawalId,
+              status: cancelResponse.status,
+              reservation_released: cancelResponse.reservation_released ?? null,
+            });
+          }
+        } catch (cancelRetryError) {
+          const retryMessage =
+            cancelRetryError instanceof Error ? cancelRetryError.message : 'Pending cancellation retry failed';
+          if (WITHDRAW_DEBUG_ENABLED) {
+            pushDebug('api:cancel:retry:error', 'Pending cancellation retry failed', {
+              withdrawal_id: pendingCancel.withdrawalId,
+              message: retryMessage,
+            });
+          }
+          setFormError('Cancellation is still being finalized on server. Please retry in a moment.');
+          return;
+        }
+      }
       if (destination === 'base') {
         setLockedQuote(quote);
         setLockedAmountInput(amountInput);
@@ -986,13 +1075,100 @@ export function WalletPanel({
           setFormError('Enter a valid USDC amount');
           return;
         }
+
+        let quoteIdForCreate = quote?.quote_id ?? null;
+        const requiresServerQuote =
+          !quoteIdForCreate || quoteExpired || quoteIdForCreate === 'local-base';
+        if (requiresServerQuote) {
+          if (WITHDRAW_DEBUG_ENABLED) {
+            pushDebug('api:quote-refresh', 'Refreshing quote before Base transfer creation', {
+              amount_minor: transferAmount.toString(),
+              previous_quote_id: quoteIdForCreate,
+            });
+          }
+          const freshQuote = await getWithdrawalQuote(
+            token,
+            {
+              dest_chain: destination,
+              transfer_amount_usdc_minor: toNumberSafe(transferAmount),
+            }
+          );
+          quoteIdForCreate = freshQuote.quote_id;
+        }
+
+        if (!quoteIdForCreate) {
+          throw new Error('Quote expired. Please refresh.');
+        }
+
+        const baseIdempotencyBase = [
+          'withdraw',
+          activeWalletAddress.toLowerCase(),
+          String(config.sourceChain.id),
+          destination,
+          destinationAddressLower,
+          quoteIdForCreate,
+          String(toNumberSafe(transferAmount)),
+        ].join(':');
+        const baseCreateIdempotencyKey = `${baseIdempotencyBase}:create`;
+        const pendingCreateForKey =
+          pendingCreateRef.current?.createIdempotencyKey === baseCreateIdempotencyKey
+            ? pendingCreateRef.current
+            : null;
+        const canReusePendingCreate =
+          !!pendingCreateForKey &&
+          withdrawalId === pendingCreateForKey.withdrawalId &&
+          withdrawalStatus === 'CREATED' &&
+          !burnTxHash &&
+          !forwardTxHash;
+
         if (WITHDRAW_DEBUG_ENABLED) {
+          pushDebug('api:create', 'Creating withdrawal before Base transfer signing', {
+            quote_id: quoteIdForCreate,
+            dest_address: destinationAddress.trim(),
+          });
+        }
+        const createResponse = canReusePendingCreate
+          ? {
+              withdrawal_id: pendingCreateForKey.withdrawalId,
+              status: 'CREATED' as const,
+            }
+          : await createWithdrawal(
+              token,
+              {
+                quote_id: quoteIdForCreate,
+                dest_address: destinationAddress.trim(),
+                sponsor_mode: 'required',
+              },
+              baseCreateIdempotencyKey
+            );
+
+        createdWithdrawalId = createResponse.withdrawal_id;
+        usedCreateIdempotencyKey = baseCreateIdempotencyKey;
+        pendingCreateRef.current = {
+          createIdempotencyKey: baseCreateIdempotencyKey,
+          withdrawalId: createResponse.withdrawal_id,
+        };
+        setWithdrawalId(createResponse.withdrawal_id);
+        setWithdrawalStatus(createResponse.status);
+        if (WITHDRAW_DEBUG_ENABLED) {
+          if (canReusePendingCreate) {
+            pushDebug('api:create', 'Reusing prepared withdrawal for Base transfer signing', {
+              withdrawal_id: createResponse.withdrawal_id,
+              status: createResponse.status,
+            });
+          } else {
+            pushDebug('api:create', 'Withdrawal created for Base transfer', {
+              withdrawal_id: createResponse.withdrawal_id,
+              status: createResponse.status,
+            });
+          }
           pushDebug('onchain:transfer', 'Sending Base transfer', {
             to: destinationAddress.trim(),
             amount_minor: transferAmount.toString(),
             token: config.usdcAddress,
           });
         }
+
         const transferData = encodeFunctionData({
           abi: erc20Abi,
           functionName: 'transfer',
@@ -1025,91 +1201,21 @@ export function WalletPanel({
           });
         }
 
-        try {
-          const token = await getAuthToken();
-          let quoteIdForCreate = quote?.quote_id ?? null;
-
-          // Base transfers should not fail UX because of stale quote;
-          // if needed, fetch a fresh quote just for server-side record.
-          if (!quoteIdForCreate || quoteExpired) {
-            try {
-              const freshQuote = await getWithdrawalQuote(
-                token,
-                {
-                  dest_chain: destination,
-                  transfer_amount_usdc_minor: toNumberSafe(transferAmount),
-                }
-              );
-              quoteIdForCreate = freshQuote.quote_id;
-            } catch (refreshError) {
-              if (WITHDRAW_DEBUG_ENABLED) {
-                const refreshMessage =
-                  refreshError instanceof Error ? refreshError.message : 'Failed to refresh quote for base transfer';
-                pushDebug('api:quote-refresh:error', 'Failed to refresh Base quote for record', {
-                  tx_hash: transferTx.hash,
-                  message: refreshMessage,
-                });
-              }
-            }
-          }
-
-          if (quoteIdForCreate) {
-            const createResponse = await createWithdrawal(
-              token,
-              {
-                quote_id: quoteIdForCreate,
-                dest_address: destinationAddress.trim(),
-              },
-              createIdempotencyKey
-            );
-
-            createdWithdrawalId = createResponse.withdrawal_id;
-            setWithdrawalId(createResponse.withdrawal_id);
-            setWithdrawalStatus(createResponse.status);
-            if (WITHDRAW_DEBUG_ENABLED) {
-              pushDebug('api:create', 'Withdrawal created for Base transfer', {
-                withdrawal_id: createResponse.withdrawal_id,
-                status: createResponse.status,
-              });
-            }
-
-            try {
-              const burnSubmitResponse = await submitBurnTx(
-                token,
-                createResponse.withdrawal_id,
-                transferTx.hash,
-                `${idempotencyBase}:burn:${transferTx.hash.toLowerCase()}`
-              );
-              burnSubmittedToBackend = true;
-              setWithdrawalStatus(burnSubmitResponse.status);
-              if (WITHDRAW_DEBUG_ENABLED) {
-                pushDebug('api:burn-submitted', 'Base transfer tx hash submitted', {
-                  withdrawal_id: createResponse.withdrawal_id,
-                  tx_hash: transferTx.hash,
-                  status: burnSubmitResponse.status,
-                });
-              }
-            } catch (submitError) {
-              if (WITHDRAW_DEBUG_ENABLED) {
-                const submitMessage =
-                  submitError instanceof Error ? submitError.message : 'Failed to submit transfer tx hash';
-                pushDebug('api:burn-submitted:error', 'Failed to submit Base transfer tx hash', {
-                  withdrawal_id: createResponse.withdrawal_id,
-                  tx_hash: transferTx.hash,
-                  message: submitMessage,
-                });
-              }
-            }
-          }
-        } catch (recordError) {
-          if (WITHDRAW_DEBUG_ENABLED) {
-            const recordMessage =
-              recordError instanceof Error ? recordError.message : 'Failed to record base transfer';
-            pushDebug('api:create:error', 'Base transfer recorded with non-blocking error', {
-              tx_hash: transferTx.hash,
-              message: recordMessage,
-            });
-          }
+        const burnSubmitResponse = await submitBurnTx(
+          token,
+          createResponse.withdrawal_id,
+          transferTx.hash,
+          `${baseIdempotencyBase}:burn:${transferTx.hash.toLowerCase()}`
+        );
+        burnSubmittedToBackend = true;
+        pendingCreateRef.current = null;
+        setWithdrawalStatus(burnSubmitResponse.status);
+        if (WITHDRAW_DEBUG_ENABLED) {
+          pushDebug('api:burn-submitted', 'Base transfer tx hash submitted', {
+            withdrawal_id: createResponse.withdrawal_id,
+            tx_hash: transferTx.hash,
+            status: burnSubmitResponse.status,
+          });
         }
 
         setWithdrawOpen(false);
@@ -1141,6 +1247,59 @@ export function WalletPanel({
       setLockedQuote(quote);
       setLockedAmountInput(amountInput);
       setLockedAmountMode(amountMode);
+
+      if (WITHDRAW_DEBUG_ENABLED) {
+        pushDebug('api:create', 'Creating withdrawal before on-chain signing', {
+          quote_id: quote.quote_id,
+          dest_address: destinationAddress.trim(),
+        });
+      }
+      const pendingCreateForKey =
+        pendingCreateRef.current?.createIdempotencyKey === createIdempotencyKey
+          ? pendingCreateRef.current
+          : null;
+      const canReusePendingCreate =
+        !!pendingCreateForKey &&
+        withdrawalId === pendingCreateForKey.withdrawalId &&
+        withdrawalStatus === 'CREATED' &&
+        !burnTxHash &&
+        !forwardTxHash;
+      const createResponse = canReusePendingCreate
+        ? {
+            withdrawal_id: pendingCreateForKey.withdrawalId,
+            status: 'CREATED' as const,
+          }
+        : await createWithdrawal(
+            token,
+            {
+              quote_id: quote.quote_id,
+              dest_address: destinationAddress.trim(),
+              sponsor_mode: 'required',
+            },
+            createIdempotencyKey
+          );
+
+      createdWithdrawalId = createResponse.withdrawal_id;
+      usedCreateIdempotencyKey = createIdempotencyKey;
+      pendingCreateRef.current = {
+        createIdempotencyKey,
+        withdrawalId: createResponse.withdrawal_id,
+      };
+      setWithdrawalId(createResponse.withdrawal_id);
+      setWithdrawalStatus(createResponse.status);
+      if (WITHDRAW_DEBUG_ENABLED) {
+        if (canReusePendingCreate) {
+          pushDebug('api:create', 'Reusing prepared withdrawal before on-chain signing', {
+            withdrawal_id: createResponse.withdrawal_id,
+            status: createResponse.status,
+          });
+        } else {
+          pushDebug('api:create', 'Withdrawal created', {
+            withdrawal_id: createResponse.withdrawal_id,
+            status: createResponse.status,
+          });
+        }
+      }
 
       const totalBurn = BigInt(quote.total_burn_usdc_minor);
       const maxFee = BigInt(quote.max_fee_usdc_minor);
@@ -1247,33 +1406,6 @@ export function WalletPanel({
         pushDebug('onchain:burn', 'Burn tx submitted', { tx_hash: burnTx.hash });
       }
 
-      const token = await getAuthToken();
-      if (WITHDRAW_DEBUG_ENABLED) {
-        pushDebug('api:create', 'Creating withdrawal after burn confirmation', {
-          quote_id: quote.quote_id,
-          dest_address: destinationAddress.trim(),
-          burn_tx_hash: burnTx.hash,
-        });
-      }
-      const createResponse = await createWithdrawal(
-        token,
-        {
-          quote_id: quote.quote_id,
-          dest_address: destinationAddress.trim(),
-        },
-        createIdempotencyKey
-      );
-
-      createdWithdrawalId = createResponse.withdrawal_id;
-      setWithdrawalId(createResponse.withdrawal_id);
-      setWithdrawalStatus(createResponse.status);
-      if (WITHDRAW_DEBUG_ENABLED) {
-        pushDebug('api:create', 'Withdrawal created', {
-          withdrawal_id: createResponse.withdrawal_id,
-          status: createResponse.status,
-        });
-      }
-
       if (WITHDRAW_DEBUG_ENABLED) {
         pushDebug('api:burn-submitted', 'Submitting burn tx hash', {
           withdrawal_id: createResponse.withdrawal_id,
@@ -1287,6 +1419,7 @@ export function WalletPanel({
         `${idempotencyBase}:burn:${burnTx.hash.toLowerCase()}`
       );
       burnSubmittedToBackend = true;
+      pendingCreateRef.current = null;
       if (WITHDRAW_DEBUG_ENABLED) {
         pushDebug('api:burn-submitted', 'Burn tx hash submitted');
       }
@@ -1300,7 +1433,11 @@ export function WalletPanel({
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Withdrawal failed';
       const isUserRejected = /reject|denied|cancelled|canceled/i.test(message);
-      if (isQuoteExpiredError(message)) {
+      const withdrawalErrorCode =
+        error instanceof WithdrawalApiError ? error.code.toUpperCase() : null;
+      const isQuoteErrorCode =
+        withdrawalErrorCode === 'QUOTE_EXPIRED' || withdrawalErrorCode === 'QUOTE_NOT_FOUND';
+      if (isQuoteExpiredError(message) || isQuoteErrorCode) {
         setLockedQuote(null);
         setLockedAmountInput(null);
         setLockedAmountMode(null);
@@ -1340,15 +1477,84 @@ export function WalletPanel({
               }
             );
           }
+        } else if (createdWithdrawalId && !burnTxHashLocal) {
+          const cancelReason = isUserRejected ? 'user_rejected' : 'client_timeout';
+          const cancelIdempotencyKey = `${
+            usedCreateIdempotencyKey ?? `withdrawal:${createdWithdrawalId}:prepared`
+          }:cancel`;
+          try {
+            if (WITHDRAW_DEBUG_ENABLED) {
+              pushDebug('api:cancel', 'Cancelling unsigned prepared withdrawal', {
+                withdrawal_id: createdWithdrawalId,
+                reason: cancelReason,
+              });
+            }
+            const token = await getAuthToken();
+            const cancelResponse = await cancelWithdrawal(token, {
+              withdrawal_id: createdWithdrawalId,
+              reason: cancelReason,
+              idempotency_key: cancelIdempotencyKey,
+            });
+            pendingCreateRef.current = null;
+            pendingCancelRef.current = null;
+            setWithdrawalId(null);
+            setWithdrawalStatus(null);
+            if (WITHDRAW_DEBUG_ENABLED) {
+              pushDebug('api:cancel', 'Unsigned withdrawal cancelled', {
+                withdrawal_id: createdWithdrawalId,
+                status: cancelResponse.status,
+                reservation_released: cancelResponse.reservation_released ?? null,
+                message: cancelResponse.message ?? null,
+              });
+            }
+          } catch (cancelError) {
+            if (WITHDRAW_DEBUG_ENABLED) {
+              const cancelMessage =
+                cancelError instanceof Error ? cancelError.message : 'Failed to cancel prepared withdrawal';
+              pushDebug('api:cancel:error', 'Failed to cancel unsigned prepared withdrawal', {
+                withdrawal_id: createdWithdrawalId,
+                reason: cancelReason,
+                message: cancelMessage,
+              });
+            }
+            pendingCreateRef.current = null;
+            pendingCancelRef.current = {
+              withdrawalId: createdWithdrawalId,
+              reason: cancelReason,
+              idempotencyKey: cancelIdempotencyKey,
+            };
+            setWithdrawalId(null);
+            setWithdrawalStatus(null);
+            cancelCleanupMessage = isUserRejected
+              ? 'Transaction cancelled in wallet. Finalizing cancellation on server, please retry in a moment.'
+              : 'Failed to finalize cancellation on server. Please retry in a moment.';
+          }
+          setLockedQuote(null);
+          setLockedAmountInput(null);
+          setLockedAmountMode(null);
+          if (WITHDRAW_DEBUG_ENABLED) {
+            pushDebug(
+              'submit:recover',
+              'Withdrawal record created but signing was not completed',
+              {
+                withdrawal_id: createdWithdrawalId,
+              }
+            );
+          }
         } else if (!createdWithdrawalId) {
           setLockedQuote(null);
           setLockedAmountInput(null);
           setLockedAmountMode(null);
         }
-        setFormError(isUserRejected ? 'Transaction cancelled in wallet.' : message);
+        const mappedCreateError =
+          error instanceof WithdrawalApiError ? mapWithdrawalCreateErrorMessage(error) : message;
+        setFormError(cancelCleanupMessage ?? (isUserRejected ? 'Transaction cancelled in wallet.' : mappedCreateError));
       }
       if (WITHDRAW_DEBUG_ENABLED) {
-        pushDebug('submit:error', 'Withdrawal submit failed', { message });
+        pushDebug('submit:error', 'Withdrawal submit failed', {
+          message,
+          code: withdrawalErrorCode,
+        });
       }
     } finally {
       setSending(false);

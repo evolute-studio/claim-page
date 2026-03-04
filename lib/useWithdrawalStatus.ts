@@ -48,7 +48,11 @@ export function useWithdrawalStatus({
   }, [debugEnabled, forwardTxHash, pushDebug, withdrawalId]);
 
   useEffect(() => {
-    if (!withdrawalId || forwardTxHash) return;
+    const isTerminalStatus =
+      withdrawalStatus === 'MINTED' ||
+      withdrawalStatus === 'FAILED' ||
+      withdrawalStatus === 'EXPIRED';
+    if (!withdrawalId || forwardTxHash || isTerminalStatus) return;
 
     let cancelled = false;
     const poll = async () => {
@@ -93,7 +97,16 @@ export function useWithdrawalStatus({
       cancelled = true;
       window.clearInterval(timerId);
     };
-  }, [debugEnabled, forwardTxHash, getAuthToken, onFailureReason, onPollingError, pushDebug, withdrawalId]);
+  }, [
+    debugEnabled,
+    forwardTxHash,
+    getAuthToken,
+    onFailureReason,
+    onPollingError,
+    pushDebug,
+    withdrawalId,
+    withdrawalStatus,
+  ]);
 
   const resetWithdrawalTracking = () => {
     setWithdrawalId(null);

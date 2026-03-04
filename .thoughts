@@ -1,0 +1,68 @@
+Withdrawal Flow Review Tracker
+Updated: 2026-03-04
+
+Status legend:
+- OPEN: not fixed
+- IN_PROGRESS: currently fixing
+- FIXED: implemented and verified
+
+Problems:
+
+1) [FIXED] Base flow may fail on pre-create because quote_id can be local ("local-base")
+- Risk: createWithdrawal can be rejected before signing, blocking Base withdraw.
+- Related code: lib/useWithdrawalQuote.ts, components/WalletPanel.tsx
+- Fix note: base pre-create now forces server quote refresh when quote_id is missing/expired/local-base.
+- Verified: `npm run lint`, `npm run build`
+
+2) [FIXED] Base flow swallows burn-submitted errors and closes modal as success
+- Risk: withdrawal exists but tx hash is not submitted to backend; tracking/reservation inconsistency.
+- Related code: components/WalletPanel.tsx
+- Fix note: base submitBurnTx errors now bubble to common catch; modal is not closed as success on submit failure.
+- Verified: `npm run lint`, `npm run build`
+
+3) [FIXED] Reservation can remain active when user cancels signing after successful create
+- Risk: sponsor limit can be exhausted by stale reservations until timeout/reaper.
+- Related code: components/WalletPanel.tsx + backend reservation lifecycle
+- Fix note: frontend now calls `POST /withdrawal/cancel` with reason + idempotency when create succeeded but signing did not complete; pending prepared withdrawal is cleared on successful cancel.
+- Additional mitigation: reuse prepared `withdrawal_id` for same idempotency key to avoid duplicate reservations on rapid retry.
+- Verified: `npm run lint`, `npm run build`
+
+4) [FIXED] useWithdrawBalance does not reset balanceMinor on wallet missing/read failure
+- Risk: stale balance value can affect validation and availability checks.
+- Related code: lib/useWithdrawBalance.ts
+- Fix note: reset `balanceMinor` (and related balance state) when wallet/read source is missing and on read errors.
+- Verified: `npm run lint`, `npm run build`
+
+5) [FIXED] Withdrawal status polling does not stop on terminal states without forward_tx_hash
+- Risk: unnecessary infinite polling and noisy errors.
+- Related code: lib/useWithdrawalStatus.ts
+- Fix note: polling now stops when status is terminal (`MINTED`, `FAILED`, `EXPIRED`) even without `forward_tx_hash`.
+- Verified: `npm run lint`, `npm run build`
+
+6) [FIXED] Base idempotency key is computed before potential quote refresh
+- Risk: retries can reuse key tied to invalid quote context and repeat failure.
+- Related code: components/WalletPanel.tsx
+- Fix note: base idempotency key is now derived after final server `quote_id` is known; `burn-submitted` key uses the same refreshed base key.
+- Verified: `npm run lint`, `npm run build`
+
+7) [FIXED] Potential stale reuse after uncertain cancel result
+- Risk: if cancel response is lost, frontend could reuse invalid prepared withdrawal id.
+- Related code: components/WalletPanel.tsx
+- Fix note: added `pendingCancelRef` + preflight cancel retry before new submit; clear pending create state on cancel failure and block new submit until cleanup retry succeeds.
+- Verified: `npm run lint`, `npm run build`
+
+8) [FIXED] Missing timeout/abort handling for withdrawal API calls
+- Risk: long hanging requests on unstable network with poor UX.
+- Related code: lib/api.ts
+- Fix note: added `fetchWithTimeout` and timeout-aware handling for quote/create/burn-submitted/cancel/status/list endpoints.
+- Verified: `npm run lint`, `npm run build`
+
+9) [FIXED] Cancel failure had no explicit UX feedback
+- Risk: user sees generic cancellation while server cleanup may still be pending.
+- Related code: components/WalletPanel.tsx
+- Fix note: user now gets explicit message when cancellation cleanup is pending and front retries pending cancel on next submit attempt.
+- Verified: `npm run lint`, `npm run build`
+
+Plan:
+- Fix in order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9
+- After each fix: update status here and run lint/build checks.
