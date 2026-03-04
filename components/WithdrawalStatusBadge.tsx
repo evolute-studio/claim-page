@@ -2,6 +2,7 @@ import type { WithdrawalStatus } from '@/types/withdrawal';
 
 interface WithdrawalStatusBadgeProps {
   status: WithdrawalStatus;
+  isDirectTransfer?: boolean;
 }
 
 const statusConfig: Record<WithdrawalStatus, { text: string; className: string }> = {
@@ -18,7 +19,7 @@ const statusConfig: Record<WithdrawalStatus, { text: string; className: string }
     className: 'bg-[rgba(245,158,11,0.16)] text-[#f6d88f] border-[rgba(245,158,11,0.34)]',
   },
   MINTED: {
-    text: 'TRANSFERED',
+    text: 'Transfered',
     className: 'bg-[rgba(16,185,129,0.16)] text-[#9ee6cb] border-[rgba(16,185,129,0.34)]',
   },
   FAILED: {
@@ -31,14 +32,16 @@ const statusConfig: Record<WithdrawalStatus, { text: string; className: string }
   },
 };
 
-export function WithdrawalStatusBadge({ status }: WithdrawalStatusBadgeProps) {
+export function WithdrawalStatusBadge({ status, isDirectTransfer = false }: WithdrawalStatusBadgeProps) {
   const config = statusConfig[status] ?? statusConfig.FAILED;
+  const text =
+    status === 'BURN_SUBMITTED' && isDirectTransfer ? 'Transfer submitted' : config.text;
 
   return (
     <span
       className={`inline-flex min-h-6 shrink-0 items-center justify-center whitespace-nowrap text-center px-3 py-0.5 rounded-full text-xs font-medium border leading-none ${config.className}`}
     >
-      {config.text}
+      {text}
     </span>
   );
 }

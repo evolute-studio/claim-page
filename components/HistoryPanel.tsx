@@ -769,7 +769,10 @@ export function HistoryPanel({
                               <p className="truncate text-xs leading-4 text-gray-500">{destinationLabel}</p>
                             </div>
                             <div className="flex shrink-0 items-center gap-2">
-                              <WithdrawalStatusBadge status={item.status} />
+                              <WithdrawalStatusBadge
+                                status={item.status}
+                                isDirectTransfer={isDirectTransfer}
+                              />
                               <button
                                 type="button"
                                 onClick={(event) => {

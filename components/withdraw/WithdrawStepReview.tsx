@@ -27,7 +27,7 @@ function getReviewStatusLabel(
     return resolved;
   }
 
-  if (resolved === 'MINTED') return 'TRANSFERED';
+  if (resolved === 'MINTED') return 'Transfered';
   if (resolved === 'FAILED') return 'Transfer failed';
   if (resolved === 'EXPIRED') return 'Transfer expired';
   if (resolved === 'BURN_SUBMITTED' || resolved === 'FORWARDING_PENDING') return 'Transfer submitted';

@@ -12,7 +12,7 @@ import { WithdrawalStatusBadge } from '@/components/WithdrawalStatusBadge';
 const FILTERS: Array<{ label: string; value: 'ALL' | WithdrawalStatus }> = [
   { label: 'All', value: 'ALL' },
   { label: 'Pending', value: 'FORWARDING_PENDING' },
-  { label: 'TRANSFERED', value: 'MINTED' },
+  { label: 'Transfered', value: 'MINTED' },
   { label: 'Failed', value: 'FAILED' },
   { label: 'Expired', value: 'EXPIRED' },
 ];
@@ -186,6 +186,9 @@ export function WithdrawalsPanel() {
           {visibleWithdrawals.map((item) => {
             const destinationLabel =
               destinations.find((dest) => dest.key === item.dest_chain)?.label ?? item.dest_chain;
+            const itemIsDirectTransfer =
+              item.flow_type === 'direct' ||
+              (item.dest_chain === 'base' && !item.forward_tx_hash);
 
             return (
               <div
@@ -201,7 +204,10 @@ export function WithdrawalsPanel() {
                     <p className="truncate text-xs leading-4 text-gray-400">{destinationLabel}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <WithdrawalStatusBadge status={item.status} />
+                    <WithdrawalStatusBadge
+                      status={item.status}
+                      isDirectTransfer={itemIsDirectTransfer}
+                    />
                     <button
                       type="button"
                       onClick={() => setSelected(item)}
@@ -238,7 +244,10 @@ export function WithdrawalsPanel() {
               </button>
             </div>
 
-            <WithdrawalStatusBadge status={selected.status} />
+            <WithdrawalStatusBadge
+              status={selected.status}
+              isDirectTransfer={selectedIsDirectTransfer}
+            />
 
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div>
