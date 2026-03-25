@@ -544,7 +544,6 @@ export function WalletPanel({
   const {
     balance,
     balanceMinor,
-    balanceMeta,
     balanceError,
     balanceLoading,
     refreshBalance,
@@ -2123,11 +2122,6 @@ export function WalletPanel({
             <p className="font-num mt-4 text-5xl font-semibold leading-none tracking-[0.04em] text-white">
               ~{formattedBalance ?? '0.00'} <span className="text-gray-400">USDC</span>
             </p>
-            {balanceMeta && !balanceMeta.isFinalized ? (
-              <p className="mt-2 text-xs uppercase tracking-[0.14em] text-gray-500">
-                Pending confirmations
-              </p>
-            ) : null}
           </>
         )}
       </div>
