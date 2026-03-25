@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { formatUnits } from 'viem';
 import {
   getWalletBalance,
   registerWalletAddress,
@@ -79,8 +80,9 @@ export function useWithdrawBalance({
   const registeredAddressRef = useRef<string | null>(null);
 
   const applyResponse = useCallback((response: WalletBalanceResponse) => {
-    setBalance(response.balance_formatted);
-    setBalanceMinor(BigInt(response.balance_minor));
+    const nextBalanceMinor = BigInt(response.balance_minor);
+    setBalance(formatUnits(nextBalanceMinor, 6));
+    setBalanceMinor(nextBalanceMinor);
     setBalanceMeta(toBalanceMeta(response));
     setBalanceError(null);
   }, []);
