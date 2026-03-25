@@ -541,21 +541,18 @@ export function WalletPanel({
   });
 
   const activeWalletAddress = wallets[0]?.address ?? null;
-  const readUsdcBalance = useCallback(async () => {
-    if (!activeWalletAddress || !config.usdcAddress) {
-      throw new Error('Missing wallet or USDC address');
-    }
-    return publicClient.readContract({
-      address: config.usdcAddress as `0x${string}`,
-      abi: erc20Abi,
-      functionName: 'balanceOf',
-      args: [activeWalletAddress as `0x${string}`],
-    });
-  }, [activeWalletAddress, config.usdcAddress, publicClient]);
-  const { balance, balanceMinor, balanceError, balanceLoading, refreshBalance } = useWithdrawBalance({
+  const {
+    balance,
+    balanceMinor,
+    balanceMeta,
+    balanceError,
+    balanceLoading,
+    refreshBalance,
+  } = useWithdrawBalance({
     activeWalletAddress,
-    usdcAddress: config.usdcAddress,
-    readBalance: activeWalletAddress && config.usdcAddress ? readUsdcBalance : null,
+    getAuthToken,
+    enabled: isActive,
+    refreshIntervalMs: 10_000,
   });
   const destinationChains = useMemo(
     () => getDestinationChains(config.sourceChain),
@@ -2122,9 +2119,16 @@ export function WalletPanel({
             <span className="inline-flex h-10 w-52 animate-pulse rounded-xl bg-white/10" />
           </div>
         ) : (
-          <p className="font-num mt-4 text-5xl font-semibold leading-none tracking-[0.04em] text-white">
-            ~{formattedBalance ?? '0.00'} <span className="text-gray-400">USDC</span>
-          </p>
+          <>
+            <p className="font-num mt-4 text-5xl font-semibold leading-none tracking-[0.04em] text-white">
+              ~{formattedBalance ?? '0.00'} <span className="text-gray-400">USDC</span>
+            </p>
+            {balanceMeta && !balanceMeta.isFinalized ? (
+              <p className="mt-2 text-xs uppercase tracking-[0.14em] text-gray-500">
+                Pending confirmations
+              </p>
+            ) : null}
+          </>
         )}
       </div>
 

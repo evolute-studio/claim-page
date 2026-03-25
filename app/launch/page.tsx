@@ -9,8 +9,8 @@ import {
   exchangeWalletLaunchCode,
   markWalletSessionLinked,
   WalletApiError,
+  type WalletApiErrorCode,
   type WalletExchangeCodeSuccess,
-  type WalletExchangeErrorCode,
 } from '@/lib/api';
 import { authDebug, tokenFingerprint } from '@/lib/authDebug';
 import { readJwtSub, resolvePrivyIdentityToken } from '@/lib/identityToken';
@@ -21,7 +21,7 @@ type LaunchScreen = 'loading' | 'open_from_game' | 'session_conflict' | 'error';
 type LaunchErrorState = {
   title: string;
   message: string;
-  code?: WalletExchangeErrorCode;
+  code?: WalletApiErrorCode;
 };
 
 type ConflictState = {

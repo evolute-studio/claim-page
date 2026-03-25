@@ -44,6 +44,19 @@ export type WalletExchangeErrorCode =
   | 'NETWORK_ERROR'
   | 'TIMEOUT';
 
+export type WalletBalanceErrorCode =
+  | 'IDENTITY_NOT_LINKED'
+  | 'ADDRESS_INVALID'
+  | 'ADDRESS_CONFLICT'
+  | 'BALANCE_NOT_TRACKED'
+  | 'PRIVY_AUTH_NOT_CONFIGURED'
+  | 'VALIDATION_ERROR'
+  | 'INTERNAL_ERROR'
+  | 'NETWORK_ERROR'
+  | 'TIMEOUT';
+
+export type WalletApiErrorCode = WalletExchangeErrorCode | WalletBalanceErrorCode;
+
 export type WalletExchangeCodeRequest = {
   code: string;
   token?: string;
@@ -54,6 +67,10 @@ export type WalletSessionLinkedRequest = {
   external_user_id: string;
   privy_user_id?: string;
   status: 'success';
+};
+
+export type WalletAddressRegistrationRequest = {
+  address: string;
 };
 
 type WalletExchangeCodeErrorPayload = {
@@ -86,11 +103,28 @@ export type WalletExchangeCodeSuccess = {
   };
 };
 
+export type WalletBalanceResponse = {
+  player_id: string;
+  chain: 'base';
+  asset: 'USDC';
+  address: string;
+  balance_minor: number;
+  balance_formatted: string;
+  finalized_balance_minor: number;
+  finalized_balance_formatted: string;
+  is_finalized: boolean;
+  observed_through_block: number;
+  finalized_through_block: number;
+  confirmations_required: number;
+  updated_at: number;
+  reconciled_at?: number | null;
+};
+
 export class WalletApiError extends Error {
-  code: WalletExchangeErrorCode;
+  code: WalletApiErrorCode;
   status: number;
 
-  constructor(message: string, code: WalletExchangeErrorCode, status = 0) {
+  constructor(message: string, code: WalletApiErrorCode, status = 0) {
     super(message);
     this.name = 'WalletApiError';
     this.code = code;
@@ -110,7 +144,7 @@ export class WithdrawalApiError extends Error {
   }
 }
 
-function readWalletErrorCode(raw: unknown): WalletExchangeErrorCode {
+function readWalletErrorCode(raw: unknown): WalletApiErrorCode {
   if (typeof raw !== 'string') return 'INTERNAL_ERROR';
   if (
     raw === 'CODE_NOT_FOUND' ||
@@ -120,6 +154,10 @@ function readWalletErrorCode(raw: unknown): WalletExchangeErrorCode {
     raw === 'PAYOUT_TOKEN_REQUIRED' ||
     raw === 'PAYOUT_TOKEN_INVALID' ||
     raw === 'WALLET_PROVIDER_NOT_ALLOWED' ||
+    raw === 'IDENTITY_NOT_LINKED' ||
+    raw === 'ADDRESS_INVALID' ||
+    raw === 'ADDRESS_CONFLICT' ||
+    raw === 'BALANCE_NOT_TRACKED' ||
     raw === 'PRIVY_AUTH_NOT_CONFIGURED' ||
     raw === 'RATE_LIMITED' ||
     raw === 'VALIDATION_ERROR' ||
@@ -146,7 +184,7 @@ function readWalletErrorMessage(payload: unknown, fallback: string): string {
   return fallback;
 }
 
-function readWalletErrorCodeFromPayload(payload: unknown): WalletExchangeErrorCode {
+function readWalletErrorCodeFromPayload(payload: unknown): WalletApiErrorCode {
   if (!payload || typeof payload !== 'object') return 'INTERNAL_ERROR';
   const record = payload as Record<string, unknown>;
   const nestedError = record.error;
@@ -159,6 +197,44 @@ function readWalletErrorCodeFromPayload(payload: unknown): WalletExchangeErrorCo
   }
   const directCode = record.error_code ?? record.code;
   return readWalletErrorCode(directCode);
+}
+
+function normalizeWalletBalanceResponse(raw: Record<string, unknown>): WalletBalanceResponse {
+  const playerId = readStringField(raw, ['player_id', 'playerId']);
+  const address = readStringField(raw, ['address']);
+  if (!playerId || !address) {
+    throw new Error('Invalid wallet balance response');
+  }
+
+  return {
+    player_id: playerId,
+    chain: 'base',
+    asset: 'USDC',
+    address,
+    balance_minor: toNumber(raw.balance_minor ?? raw.balanceMinor),
+    balance_formatted:
+      readStringField(raw, ['balance_formatted', 'balanceFormatted']) ?? '0.000000',
+    finalized_balance_minor: toNumber(
+      raw.finalized_balance_minor ?? raw.finalizedBalanceMinor
+    ),
+    finalized_balance_formatted:
+      readStringField(raw, [
+        'finalized_balance_formatted',
+        'finalizedBalanceFormatted',
+      ]) ?? '0.000000',
+    is_finalized: Boolean(raw.is_finalized ?? raw.isFinalized),
+    observed_through_block: toNumber(
+      raw.observed_through_block ?? raw.observedThroughBlock
+    ),
+    finalized_through_block: toNumber(
+      raw.finalized_through_block ?? raw.finalizedThroughBlock
+    ),
+    confirmations_required: toNumber(
+      raw.confirmations_required ?? raw.confirmationsRequired
+    ),
+    updated_at: toNumber(raw.updated_at ?? raw.updatedAt),
+    reconciled_at: toNumber(raw.reconciled_at ?? raw.reconciledAt) || null,
+  };
 }
 
 function readWithdrawalErrorMessage(payload: unknown, fallback: string): string {
@@ -319,6 +395,52 @@ export async function markWalletSessionLinked(
     },
     'Failed to confirm wallet session'
   );
+}
+
+export async function registerWalletAddress(
+  privyIdentityToken: string,
+  payload: WalletAddressRegistrationRequest
+): Promise<WalletBalanceResponse> {
+  const normalizedPrivyIdentityToken = privyIdentityToken.trim();
+  if (!normalizedPrivyIdentityToken) {
+    throw new WalletApiError('Missing identity token.', 'INTERNAL_ERROR');
+  }
+
+  const data = await fetchWalletJson<Record<string, unknown>>(
+    '/v1/wallet/address',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${normalizedPrivyIdentityToken}`,
+      },
+      body: JSON.stringify(payload),
+    },
+    'Failed to register wallet address'
+  );
+
+  return normalizeWalletBalanceResponse(data);
+}
+
+export async function getWalletBalance(
+  privyIdentityToken: string
+): Promise<WalletBalanceResponse> {
+  const normalizedPrivyIdentityToken = privyIdentityToken.trim();
+  if (!normalizedPrivyIdentityToken) {
+    throw new WalletApiError('Missing identity token.', 'INTERNAL_ERROR');
+  }
+
+  const data = await fetchWalletJson<Record<string, unknown>>(
+    '/v1/wallet/balance',
+    {
+      headers: {
+        Authorization: `Bearer ${normalizedPrivyIdentityToken}`,
+      },
+    },
+    'Failed to load wallet balance'
+  );
+
+  return normalizeWalletBalanceResponse(data);
 }
 
 const DEST_DOMAIN_BY_CHAIN: Record<DestinationChain, number> = {
