@@ -1,10 +1,10 @@
 'use client';
 
-import { Toaster } from 'sonner';
+import { Toaster as Sonner, type ToasterProps } from 'sonner';
 
-export function AppToaster() {
+const Toaster = ({ ...props }: ToasterProps) => {
   return (
-    <Toaster
+    <Sonner
       theme="dark"
       position="top-center"
       expand={false}
@@ -36,6 +36,9 @@ export function AppToaster() {
             'border-sky-400/28 bg-[radial-gradient(120%_120%_at_0%_0%,rgba(56,189,248,0.16),transparent_52%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(0,0,0,0.06)),rgba(17,17,17,0.95)]',
         },
       }}
+      {...props}
     />
   );
-}
+};
+
+export { Toaster };

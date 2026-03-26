@@ -33,6 +33,12 @@ body {
   font-family: var(--font-text), 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
+[data-sonner-toast][data-styled='true'] [data-close-button] {
+  left: auto !important;
+  right: 0 !important;
+  transform: translate(35%, -35%) !important;
+}
+
 .font-num {
   font-family: var(--font-text), 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-variant-numeric: tabular-nums lining-nums;
