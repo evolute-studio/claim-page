@@ -871,6 +871,8 @@ export function WalletPanel({
     }).format(numeric);
   }, [balance]);
   const showBalanceSkeleton = balanceLoading && !formattedBalance;
+  const canOpenWithdraw =
+    !!activeWalletAddress && config.errors.length === 0 && balanceMinor !== null;
   const availabilityFeeMinor = useMemo(() => {
     if (destination === 'base') return 0n;
     if (quote) return BigInt(quote.max_fee_usdc_minor ?? 0);
@@ -932,6 +934,7 @@ export function WalletPanel({
   }, [formError, shouldPersistFormError]);
 
   const handleOpenWithdraw = () => {
+    if (!canOpenWithdraw) return;
     setFormError(null);
     setAmountInput('');
     setDestination('base');
@@ -2182,7 +2185,7 @@ export function WalletPanel({
           <button
             type="button"
             onClick={handleOpenWithdraw}
-            disabled={!activeWalletAddress || config.errors.length > 0}
+            disabled={!canOpenWithdraw}
             className="interactive-fx no-shimmer inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-3 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:bg-white/10 disabled:text-white/40"
           >
             <SendHorizontal size={16} strokeWidth={1.9} className="block" aria-hidden="true" />
