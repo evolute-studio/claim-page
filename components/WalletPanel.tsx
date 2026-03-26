@@ -63,6 +63,10 @@ const ZERO_BYTES32 = `0x${'0'.repeat(64)}` as `0x${string}`;
 const WITHDRAW_DEBUG_ENABLED =
   (process.env.NEXT_PUBLIC_WITHDRAW_DEBUG ?? '').toLowerCase() === 'true';
 const SHOW_WITHDRAW_DEBUG_TOGGLE = false;
+const WITHDRAW_BALANCE_SOURCE =
+  (process.env.NEXT_PUBLIC_WALLET_BALANCE_SOURCE ?? 'balance_of').trim().toLowerCase() === 'server'
+    ? 'server'
+    : 'balance_of';
 
 type WithdrawDebugEvent = {
   ts: number;
@@ -567,6 +571,9 @@ export function WalletPanel({
     getAuthToken,
     enabled: isActive,
     refreshIntervalMs: 10_000,
+    source: WITHDRAW_BALANCE_SOURCE,
+    publicClient,
+    tokenAddress: config.usdcAddress as `0x${string}`,
   });
   const destinationChains = useMemo(
     () => getDestinationChains(config.sourceChain),

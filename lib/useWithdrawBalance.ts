@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { formatUnits } from 'viem';
+import type { PublicClient } from 'viem';
+import { erc20Abi, formatUnits } from 'viem';
 import {
   getWalletBalance,
   registerWalletAddress,
@@ -7,11 +8,16 @@ import {
   type WalletBalanceResponse,
 } from '@/lib/api';
 
+export type WithdrawBalanceSource = 'server' | 'balance_of';
+
 type UseWithdrawBalanceParams = {
   activeWalletAddress: string | null;
   getAuthToken: () => Promise<string>;
   enabled?: boolean;
   refreshIntervalMs?: number;
+  source?: WithdrawBalanceSource;
+  publicClient?: PublicClient;
+  tokenAddress?: `0x${string}` | null;
 };
 
 export type WalletBalanceMeta = {
@@ -57,11 +63,21 @@ function toBalanceMeta(response: WalletBalanceResponse): WalletBalanceMeta {
   };
 }
 
+function mapOnchainBalanceErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return 'Failed to read onchain USDC balance';
+}
+
 export function useWithdrawBalance({
   activeWalletAddress,
   getAuthToken,
   enabled = true,
   refreshIntervalMs = 10_000,
+  source = 'server',
+  publicClient,
+  tokenAddress = null,
 }: UseWithdrawBalanceParams) {
   const [balance, setBalance] = useState<string | null>(null);
   const [balanceMinor, setBalanceMinor] = useState<bigint | null>(null);
@@ -162,6 +178,32 @@ export function useWithdrawBalance({
       setBalanceLoading(true);
       setBalanceError(null);
 
+      if (source === 'balance_of') {
+        try {
+          if (!publicClient || !tokenAddress) {
+            throw new Error('Onchain balance source is not configured.');
+          }
+
+          const onchainBalance = await publicClient.readContract({
+            address: tokenAddress,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [activeWalletAddress as `0x${string}`],
+          });
+          if (cancelled || requestIdRef.current !== requestId) return;
+
+          setBalance(formatUnits(onchainBalance, 6));
+          setBalanceMinor(onchainBalance);
+          setBalanceMeta(null);
+          setBalanceError(null);
+          return;
+        } catch (error) {
+          if (cancelled || requestIdRef.current !== requestId) return;
+          setBalanceError(mapOnchainBalanceErrorMessage(error));
+          return;
+        }
+      }
+
       const runBalanceFetch = async (token: string) => {
         const response = await getWalletBalance(token);
         if (cancelled || requestIdRef.current !== requestId) return;
@@ -226,7 +268,16 @@ export function useWithdrawBalance({
     return () => {
       cancelled = true;
     };
-  }, [activeWalletAddress, applyResponse, balanceRefreshNonce, enabled, getAuthToken]);
+  }, [
+    activeWalletAddress,
+    applyResponse,
+    balanceRefreshNonce,
+    enabled,
+    getAuthToken,
+    publicClient,
+    source,
+    tokenAddress,
+  ]);
 
   return {
     balance,
