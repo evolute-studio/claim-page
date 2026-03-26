@@ -40,6 +40,7 @@ export function useNetworkFeeEstimates({
   const [networkFeeEstimates, setNetworkFeeEstimates] = useState<
     Partial<Record<DestinationChain, number>>
   >({});
+  const [networkFeeError, setNetworkFeeError] = useState<string | null>(null);
   const [networkFeeLoading, setNetworkFeeLoading] = useState(false);
   const [networkFeeRetryNonce, setNetworkFeeRetryNonce] = useState(0);
 
@@ -50,6 +51,7 @@ export function useNetworkFeeEstimates({
   const retryDelayMsRef = useRef(BASE_RETRY_DELAY_MS);
 
   const resetRuntimeState = useCallback(() => {
+    setNetworkFeeError(null);
     setNetworkFeeLoading(false);
     setNetworkFeeRetryNonce(0);
     inFlightRef.current = false;
@@ -157,6 +159,11 @@ export function useNetworkFeeEstimates({
         }
 
         if (failedChains.length > 0) {
+          setNetworkFeeError(
+            failedChains.length === destinationChains.length
+              ? 'Network fee estimates are temporarily unavailable.'
+              : 'Some network fee estimates are temporarily unavailable.'
+          );
           const hasRateLimit = failedChains.some((chain) =>
             /429|too many requests/i.test(failedReasons[chain] ?? '')
           );
@@ -173,6 +180,7 @@ export function useNetworkFeeEstimates({
             setNetworkFeeRetryNonce((value) => value + 1);
           }, nextDelay);
         } else {
+          setNetworkFeeError(null);
           retryDelayMsRef.current = BASE_RETRY_DELAY_MS;
           retryAllowedAtRef.current = 0;
           if (retryTimerRef.current) {
@@ -184,6 +192,7 @@ export function useNetworkFeeEstimates({
         if (!cancelled && requestIdRef.current === requestId) {
           const message =
             error instanceof Error ? error.message : 'Failed to fetch network fee estimates';
+          setNetworkFeeError(message);
           const hasRateLimit = /429|too many requests/i.test(message);
           const nextDelay = hasRateLimit
             ? Math.min(
@@ -241,6 +250,7 @@ export function useNetworkFeeEstimates({
 
   return {
     networkFeeEstimates,
+    networkFeeError,
     networkFeeLoading,
     resetNetworkFeeRuntimeState: resetRuntimeState,
   };

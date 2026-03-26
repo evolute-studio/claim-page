@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { getIdentityToken, useIdentityToken, usePrivy } from '@privy-io/react-auth';
 import { ChevronDown, Inbox, RotateCw } from 'lucide-react';
+import { toast } from 'sonner';
 import { authDebug, createAuthTraceId, isAuthDebugEnabled, tokenFingerprint } from '@/lib/authDebug';
 import { getMyPayouts, getMyWithdrawals } from '@/lib/api';
 import { getCctpConfig, getDestinationChains } from '@/lib/cctp';
@@ -56,10 +57,17 @@ function openExplorerUrl(chain: string, txHash: string, forceBaseSepolia = false
   return getExplorerTxUrl(chain, txHash, { forceBaseSepolia });
 }
 
-function EmptyHistoryState({ view }: { view: HistoryView }) {
-  const title = view === 'incomes' ? 'No incomes yet' : 'No outcomes yet';
-  const description =
-    view === 'incomes'
+function EmptyHistoryState({ view, unavailable = false }: { view: HistoryView; unavailable?: boolean }) {
+  const title = unavailable
+    ? view === 'incomes'
+      ? 'Incomes unavailable'
+      : 'Outcomes unavailable'
+    : view === 'incomes'
+      ? 'No incomes yet'
+      : 'No outcomes yet';
+  const description = unavailable
+    ? 'Try again in a moment.'
+    : view === 'incomes'
       ? 'Once you receive payouts, they will appear here.'
       : 'Once you send funds, they will appear here.';
 
@@ -124,6 +132,7 @@ export function HistoryPanel({
   const lastFocusRefreshSignatureRef = useRef<string | null>(null);
   const refreshSpinHasFullTurnRef = useRef(false);
   const refreshSpinStopRequestedRef = useRef(false);
+  const lastErrorToastRef = useRef<string | null>(null);
 
   useEffect(() => {
     identityTokenRef.current = identityToken ?? null;
@@ -229,6 +238,15 @@ export function HistoryPanel({
 
     return () => window.clearInterval(timerId);
   }, [currentPrivyUserId, loading, loadHistory]);
+  useEffect(() => {
+    if (!error) {
+      lastErrorToastRef.current = null;
+      return;
+    }
+    if (lastErrorToastRef.current === error) return;
+    lastErrorToastRef.current = error;
+    toast.error('History unavailable', { description: error });
+  }, [error]);
 
   useLayoutEffect(() => {
     const pending = pendingScrollRestoreRef.current;
@@ -502,17 +520,6 @@ export function HistoryPanel({
         </button>
       </div>
 
-      {error && (
-        <div
-          className={`rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300 transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
-            isActive ? 'translate-x-0 opacity-100 brightness-100' : 'translate-x-8 opacity-35 brightness-50'
-          }`}
-          style={{ transitionDelay: '120ms' }}
-        >
-          {error}
-        </div>
-      )}
-
       {loading ? (
         <div
           className={`min-h-0 flex-1 overflow-hidden transition-[transform,opacity,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
@@ -554,7 +561,7 @@ export function HistoryPanel({
           >
             <div className="min-h-0 h-full w-1/2 pr-1">
               {incomes.length === 0 ? (
-                <EmptyHistoryState view="incomes" />
+                <EmptyHistoryState view="incomes" unavailable={!!error} />
               ) : (
                 <div
                   ref={incomesListRef}
@@ -701,7 +708,7 @@ export function HistoryPanel({
 
             <div className="min-h-0 h-full w-1/2 pl-1">
               {outcomes.length === 0 ? (
-                <EmptyHistoryState view="outcomes" />
+                <EmptyHistoryState view="outcomes" unavailable={!!error} />
               ) : (
                 <div
                   ref={outcomesListRef}

@@ -37,6 +37,11 @@ const appLinks: DebugLink[] = [
   { label: 'Account', href: '/app/account?debug=1' },
 ];
 
+const qaLabLinks: DebugLink[] = [
+  { label: 'Withdraw lab', href: '/debug/withdraw' },
+  { label: 'Toast lab', href: '/debug/toasts' },
+];
+
 const payoutStatuses: PayoutStatus[] = [
   'CREATED',
   'PENDING_EMAIL',
@@ -147,6 +152,7 @@ export default function DebugGalleryPage() {
         <Section title="Claim" links={claimLinks} />
         <Section title="Claim Decision" links={claimDecisionLinks} />
         <Section title="App" links={appLinks} />
+        <Section title="QA Labs" links={qaLabLinks} />
         <TournamentPayoutsPreview />
       </div>
     </main>

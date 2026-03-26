@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
 import { PrivyProviderWrapper } from '@/lib/privy';
+import { AppToaster } from '@/components/AppToaster';
 import { PwaServiceWorker } from '@/components/PwaServiceWorker';
 import './globals.css';
 
@@ -47,6 +48,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${appFont.variable} antialiased`}>
         <PrivyProviderWrapper>
           {children}
+          <AppToaster />
           <PwaServiceWorker />
         </PrivyProviderWrapper>
       </body>

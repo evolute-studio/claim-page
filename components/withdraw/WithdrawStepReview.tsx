@@ -117,7 +117,7 @@ export function WithdrawStepReview({
 }: WithdrawStepReviewProps) {
   const isBaseTransfer = destination === 'base';
   const reviewStatusLabel = getReviewStatusLabel(destination, withdrawalStatus, !!burnTxHash);
-  const showQuoteSkeleton = !isBaseTransfer && (!displayQuote || !!quoteError);
+  const showQuoteSkeleton = !isBaseTransfer && !displayQuote && !quoteError;
   const isDestinationAddressEmpty = destinationAddressTrimmed.length === 0;
   const isQuoteDanger =
     !isBaseTransfer && !isQuoteLocked && quoteSecondsRemaining !== null && quoteSecondsRemaining <= 10;
@@ -135,7 +135,15 @@ export function WithdrawStepReview({
     displayMode === 'receive'
       ? (displayQuote?.transfer_amount_usdc_minor ?? derivedReceiveMinor ?? 0)
       : (derivedReceiveMinor ?? displayQuote?.transfer_amount_usdc_minor ?? 0);
-  const feePillLabel = isBaseTransfer ? 'Fixed' : isQuoteLocked ? 'Locked' : quoteTimeRemaining;
+  const feePillLabel = isBaseTransfer
+    ? 'Fixed'
+    : quoteError && !displayQuote
+      ? '--'
+      : isQuoteLocked
+        ? 'Locked'
+        : displayQuote
+          ? quoteTimeRemaining
+          : '--';
 
   return (
     <div className="flex flex-1 flex-col justify-between pb-6 pt-4 animate-slide-in">

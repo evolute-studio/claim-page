@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getIdentityToken, useIdentityToken, usePrivy, useWallets } from '@privy-io/react-auth';
+import { toast } from 'sonner';
 import { confirmClaim, confirmClaimByPayoutId, getMyPayouts } from '@/lib/api';
 import { authDebug, createAuthTraceId, isAuthDebugEnabled, tokenFingerprint } from '@/lib/authDebug';
 import { getExplorerTxUrl } from '@/lib/explorer';
@@ -62,6 +63,7 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<'ALL' | PayoutStatus>('ALL');
   const [selectedPayout, setSelectedPayout] = useState<PayoutPreview | null>(null);
+  const lastErrorToastRef = useRef<string | null>(null);
 
   const getAuthToken = useCallback(async () => {
     return resolvePrivyIdentityToken({
@@ -189,6 +191,15 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
 
     return () => window.clearInterval(timerId);
   }, [claimingId, loadPayouts, loading, payouts]);
+  useEffect(() => {
+    if (!error) {
+      lastErrorToastRef.current = null;
+      return;
+    }
+    if (lastErrorToastRef.current === error) return;
+    lastErrorToastRef.current = error;
+    toast.error('Payouts unavailable', { description: error });
+  }, [error]);
 
   const visiblePayouts = useMemo(() => {
     const filtered =
@@ -280,16 +291,12 @@ export function PayoutsPanel({ focusToken }: { focusToken?: string | null }) {
         ))}
       </div>
 
-      {error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
-          {error}
-        </div>
-      )}
-
       {loading ? (
         <p className="text-sm text-gray-400">Loading payouts...</p>
       ) : visiblePayouts.length === 0 ? (
-        <p className="text-sm text-gray-400">No payouts found.</p>
+        <p className="text-sm text-gray-400">
+          {error ? 'Payouts are temporarily unavailable.' : 'No payouts found.'}
+        </p>
       ) : (
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {visiblePayouts.map((item) => {

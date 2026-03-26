@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getIdentityToken, useIdentityToken, usePrivy } from '@privy-io/react-auth';
+import { toast } from 'sonner';
 import { getMyWithdrawals } from '@/lib/api';
 import { getCctpConfig, getDestinationChains } from '@/lib/cctp';
 import { truncateAddress } from '@/lib/format';
@@ -72,6 +73,7 @@ export function WithdrawalsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<WithdrawalListItem | null>(null);
   const [activeFilter, setActiveFilter] = useState<'ALL' | WithdrawalStatus>('ALL');
+  const lastErrorToastRef = useRef<string | null>(null);
 
   const getAuthToken = useCallback(async () => {
     return resolvePrivyIdentityToken({
@@ -112,6 +114,15 @@ export function WithdrawalsPanel() {
     if (!isSessionReady) return;
     loadWithdrawals('initial');
   }, [isSessionReady, loadWithdrawals]);
+  useEffect(() => {
+    if (!error) {
+      lastErrorToastRef.current = null;
+      return;
+    }
+    if (lastErrorToastRef.current === error) return;
+    lastErrorToastRef.current = error;
+    toast.error('Withdrawals unavailable', { description: error });
+  }, [error]);
 
   const visibleWithdrawals = useMemo(() => {
     if (activeFilter === 'ALL') return withdrawals;
@@ -171,16 +182,12 @@ export function WithdrawalsPanel() {
         ))}
       </div>
 
-      {error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
-          {error}
-        </div>
-      )}
-
       {loading ? (
         <p className="text-sm text-gray-400">Loading withdrawals...</p>
       ) : visibleWithdrawals.length === 0 ? (
-        <p className="text-sm text-gray-400">No withdrawals found.</p>
+        <p className="text-sm text-gray-400">
+          {error ? 'Withdrawals are temporarily unavailable.' : 'No withdrawals found.'}
+        </p>
       ) : (
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {visibleWithdrawals.map((item) => {

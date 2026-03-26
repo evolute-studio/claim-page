@@ -11,6 +11,7 @@ import {
 } from '@privy-io/react-auth';
 import type { SendTransactionModalUIOptions } from '@privy-io/react-auth';
 import { ArrowLeft, Circle, SendHorizontal, X } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   createPublicClient,
   encodeFunctionData,
@@ -505,6 +506,10 @@ export function WalletPanel({
     reason: string;
     idempotencyKey: string;
   } | null>(null);
+  const lastBalanceToastRef = useRef<string | null>(null);
+  const lastQuoteToastRef = useRef<string | null>(null);
+  const lastClaimableToastRef = useRef<string | null>(null);
+  const lastNetworkFeeToastRef = useRef<string | null>(null);
 
   const pushDebug = useCallback(
     (stage: string, message: string, data?: Record<string, unknown>) => {
@@ -569,6 +574,7 @@ export function WalletPanel({
   );
   const {
     networkFeeEstimates,
+    networkFeeError,
     networkFeeLoading,
     resetNetworkFeeRuntimeState,
   } = useNetworkFeeEstimates({
@@ -779,6 +785,42 @@ export function WalletPanel({
     if (!WITHDRAW_DEBUG_ENABLED || !quoteError) return;
     pushDebug('quote:error', 'Quote error', { message: quoteError });
   }, [quoteError, pushDebug]);
+  useEffect(() => {
+    if (!balanceError) {
+      lastBalanceToastRef.current = null;
+      return;
+    }
+    if (lastBalanceToastRef.current === balanceError) return;
+    lastBalanceToastRef.current = balanceError;
+    toast.error('Balance unavailable', { description: balanceError });
+  }, [balanceError]);
+  useEffect(() => {
+    if (!networkFeeError) {
+      lastNetworkFeeToastRef.current = null;
+      return;
+    }
+    if (lastNetworkFeeToastRef.current === networkFeeError) return;
+    lastNetworkFeeToastRef.current = networkFeeError;
+    toast.error('Fee estimate unavailable', { description: networkFeeError });
+  }, [networkFeeError]);
+  useEffect(() => {
+    if (!quoteError) {
+      lastQuoteToastRef.current = null;
+      return;
+    }
+    if (lastQuoteToastRef.current === quoteError) return;
+    lastQuoteToastRef.current = quoteError;
+    toast.error('Quote unavailable', { description: quoteError });
+  }, [quoteError]);
+  useEffect(() => {
+    if (!claimablePayoutsError) {
+      lastClaimableToastRef.current = null;
+      return;
+    }
+    if (lastClaimableToastRef.current === claimablePayoutsError) return;
+    lastClaimableToastRef.current = claimablePayoutsError;
+    toast.error('Unable to load claimable payouts', { description: claimablePayoutsError });
+  }, [claimablePayoutsError]);
 
   const baseExplorerBase = useMemo(() => {
     return config.sourceChain.id === 84532
@@ -828,7 +870,7 @@ export function WalletPanel({
       maximumFractionDigits: 2,
     }).format(numeric);
   }, [balance]);
-  const showBalanceSkeleton = balanceLoading && !formattedBalance && !balanceError;
+  const showBalanceSkeleton = balanceLoading && !formattedBalance;
   const availabilityFeeMinor = useMemo(() => {
     if (destination === 'base') return 0n;
     if (quote) return BigInt(quote.max_fee_usdc_minor ?? 0);
@@ -2111,9 +2153,7 @@ export function WalletPanel({
         style={{ transitionDelay: '0ms' }}
       >
         <p className="font-num text-base uppercase tracking-[0.14em] text-gray-500">Your balance</p>
-        {balanceError ? (
-          <p className="mt-2 text-sm text-red-400">{balanceError}</p>
-        ) : showBalanceSkeleton ? (
+        {showBalanceSkeleton ? (
           <div className="mt-4 flex min-h-[48px] items-center justify-center">
             <span className="inline-flex h-10 w-52 animate-pulse rounded-xl bg-white/10" />
           </div>
@@ -2162,10 +2202,6 @@ export function WalletPanel({
             <p className="text-xs uppercase tracking-[0.14em] text-gray-500">Tournament payouts</p>
           </div>
 
-          {claimablePayoutsError && (
-            <p className="mb-2 text-xs text-red-400">{claimablePayoutsError}</p>
-          )}
-
           <div
             onWheel={() => {
               armClaimablePayoutsScroll();
@@ -2195,6 +2231,10 @@ export function WalletPanel({
                     <span className="mt-4 block h-11 w-full animate-pulse rounded-xl bg-white/8" />
                   </div>
                 ))}
+              </div>
+            ) : claimablePayoutsError && claimablePayouts.length === 0 ? (
+              <div className="rounded-2xl border border-white/[0.08] bg-white/[0.015] p-4 text-sm text-gray-400">
+                Claimable payouts are temporarily unavailable.
               </div>
             ) : (
               <div className="space-y-3 pb-2">

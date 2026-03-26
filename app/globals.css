@@ -13,6 +13,26 @@ body {
   font-family: var(--font-text), 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
+[data-sonner-toaster] {
+  --normal-bg: rgba(17, 17, 17, 0.95);
+  --normal-border: rgba(255, 255, 255, 0.12);
+  --normal-text: #ffffff;
+  --success-bg: rgba(17, 17, 17, 0.95);
+  --success-border: rgba(52, 211, 153, 0.28);
+  --success-text: #ffffff;
+  --info-bg: rgba(17, 17, 17, 0.95);
+  --info-border: rgba(56, 189, 248, 0.28);
+  --info-text: #ffffff;
+  --warning-bg: rgba(17, 17, 17, 0.95);
+  --warning-border: rgba(251, 191, 36, 0.28);
+  --warning-text: #ffffff;
+  --error-bg: rgba(17, 17, 17, 0.95);
+  --error-border: rgba(248, 113, 113, 0.3);
+  --error-text: #ffffff;
+  --border-radius: 22px;
+  font-family: var(--font-text), 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
 .font-num {
   font-family: var(--font-text), 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-variant-numeric: tabular-nums lining-nums;
