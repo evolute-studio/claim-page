@@ -40,7 +40,7 @@ export function WithdrawStepNetwork({
     destinationChains.length === 1 ? 'option' : 'options'
   }`;
   const metaChipClass =
-    'inline-flex h-8 min-w-[88px] items-center justify-center rounded-full px-3 text-[11px] font-medium tracking-[0.02em]';
+    'inline-flex h-7 min-w-[72px] items-center justify-center rounded-full px-2.5 text-[11px] font-medium tracking-[0.04em]';
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-4 animate-slide-in">
@@ -52,7 +52,7 @@ export function WithdrawStepNetwork({
           </p>
           <p className="text-[14px] text-gray-400">Pick destination network</p>
         </div>
-        <span className={`shrink-0 border border-white/14 bg-white/[0.05] text-gray-300 ${metaChipClass}`}>
+        <span className={`shrink-0 bg-white/[0.04] text-gray-500 ${metaChipClass}`}>
           {optionsCountLabel}
         </span>
       </div>

@@ -64,7 +64,6 @@ type WithdrawStepReviewProps = {
   quoteError: string | null;
   displayMode: 'receive' | 'pay';
   showQuoteRefreshingHint: boolean;
-  formError: string | null;
   insufficientBalance: boolean;
   belowMinReceive: boolean;
   minPayMinor: number;
@@ -100,7 +99,6 @@ export function WithdrawStepReview({
   quoteError,
   displayMode,
   showQuoteRefreshingHint,
-  formError,
   insufficientBalance,
   belowMinReceive,
   minPayMinor,
@@ -305,7 +303,6 @@ export function WithdrawStepReview({
           </div>
         )}
 
-        {formError && <p className="rounded-2xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm text-red-300">{formError}</p>}
         {insufficientBalance && (
           <p className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-3 py-2.5 text-sm text-yellow-300">Insufficient USDC balance for this amount.</p>
         )}

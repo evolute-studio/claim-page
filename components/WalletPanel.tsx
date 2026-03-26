@@ -510,6 +510,7 @@ export function WalletPanel({
   const lastQuoteToastRef = useRef<string | null>(null);
   const lastClaimableToastRef = useRef<string | null>(null);
   const lastNetworkFeeToastRef = useRef<string | null>(null);
+  const lastFormErrorToastRef = useRef<string | null>(null);
 
   const pushDebug = useCallback(
     (stage: string, message: string, data?: Record<string, unknown>) => {
@@ -932,6 +933,16 @@ export function WalletPanel({
     }, 4200);
     return () => window.clearTimeout(timerId);
   }, [formError, shouldPersistFormError]);
+
+  useEffect(() => {
+    if (!withdrawOpen || !formError) {
+      lastFormErrorToastRef.current = null;
+      return;
+    }
+    if (lastFormErrorToastRef.current === formError) return;
+    lastFormErrorToastRef.current = formError;
+    toast.error('Unable to continue withdrawal', { description: formError });
+  }, [formError, withdrawOpen]);
 
   const handleOpenWithdraw = () => {
     if (!canOpenWithdraw) return;
@@ -2087,7 +2098,6 @@ export function WalletPanel({
                 quoteError={quoteError}
                 displayMode={displayMode}
                 showQuoteRefreshingHint={showQuoteRefreshingHint}
-                formError={formError}
                 insufficientBalance={insufficientBalance}
                 belowMinReceive={belowMinReceive}
                 minPayMinor={minPayMinor}
