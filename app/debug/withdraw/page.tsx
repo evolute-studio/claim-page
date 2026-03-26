@@ -305,7 +305,6 @@ export default function DebugWithdrawPage() {
             quoteError={null}
             displayMode="pay"
             showQuoteRefreshingHint={false}
-            formError={null}
             insufficientBalance={false}
             belowMinReceive={false}
             minPayMinor={1_160_000}
@@ -346,7 +345,6 @@ export default function DebugWithdrawPage() {
             quoteError={null}
             displayMode="pay"
             showQuoteRefreshingHint={false}
-            formError={null}
             insufficientBalance={false}
             belowMinReceive={false}
             minPayMinor={1_160_000}
@@ -387,7 +385,6 @@ export default function DebugWithdrawPage() {
             quoteError="Quote request timed out. Please try again."
             displayMode="pay"
             showQuoteRefreshingHint={false}
-            formError={null}
             insufficientBalance={false}
             belowMinReceive={false}
             minPayMinor={1_160_000}
@@ -428,7 +425,6 @@ export default function DebugWithdrawPage() {
             quoteError={null}
             displayMode="pay"
             showQuoteRefreshingHint={false}
-            formError={null}
             insufficientBalance={false}
             belowMinReceive={false}
             minPayMinor={1_160_000}
@@ -469,7 +465,6 @@ export default function DebugWithdrawPage() {
             quoteError={null}
             displayMode="pay"
             showQuoteRefreshingHint={false}
-            formError={null}
             insufficientBalance={false}
             belowMinReceive={false}
             minPayMinor={1_280_000}
