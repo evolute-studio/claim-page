@@ -203,56 +203,65 @@ function VerticalDotsIcon() {
 
 function buildTxUiOptions(params: {
   mode: 'transfer' | 'approve' | 'burn';
+  amountLabel?: string;
   destinationLabel?: string;
 }): SendTransactionModalUIOptions {
   if (params.mode === 'transfer') {
+    const amountText = params.amountLabel ? `${params.amountLabel} USDC` : 'USDC';
     return {
-      description: 'Confirm sending USDC on Base.',
+      description: `Confirm sending ${amountText} on Base.`,
       buttonText: 'Confirm',
       transactionInfo: {
         title: 'Transfer details',
-        action: 'Send USDC',
+        action: `Send ${amountText}`,
         contractInfo: {
           name: 'USD Coin (USDC)',
         },
       },
       successHeader: 'Transfer submitted',
-      successDescription: 'Transaction has been sent.',
+      successDescription: `${amountText} transfer has been sent.`,
       isCancellable: true,
     };
   }
 
   if (params.mode === 'approve') {
+    const amountText = params.amountLabel ? `${params.amountLabel} USDC` : 'USDC';
     return {
-      description: 'Approve USDC allowance for this bridge transfer.',
+      description: `Approve ${amountText} allowance for this bridge transfer.`,
       buttonText: 'Approve',
       transactionInfo: {
         title: 'Approval details',
-        action: 'Approve USDC',
+        action: `Approve ${amountText}`,
         contractInfo: {
           name: 'USD Coin (USDC)',
         },
       },
       successHeader: 'Approval submitted',
-      successDescription: 'Allowance transaction has been sent.',
+      successDescription: `${amountText} allowance transaction has been sent.`,
       isCancellable: true,
     };
   }
 
+  const amountText = params.amountLabel ? `${params.amountLabel} USDC` : 'USDC';
   return {
-    description: `Confirm bridge transfer to ${params.destinationLabel ?? 'destination network'}.`,
+    description: `Confirm bridge transfer of ${amountText} to ${params.destinationLabel ?? 'destination network'}.`,
     buttonText: 'Confirm',
     transactionInfo: {
       title: 'Bridge details',
-      action: 'Bridge USDC',
+      action: `Bridge ${amountText}`,
       contractInfo: {
         name: 'CCTP TokenMessengerV2',
       },
     },
     successHeader: 'Bridge transaction submitted',
-    successDescription: 'USDC transfer is in progress.',
+    successDescription: `${amountText} transfer is in progress.`,
     isCancellable: true,
   };
+}
+
+function formatTxAmountLabel(amount: bigint): string {
+  const raw = formatUnits(amount, 6);
+  return raw.replace(/\.?0+$/, '');
 }
 
 // Backspace icon shape from Lucide (ISC License), embedded as inline SVG.
@@ -1267,7 +1276,10 @@ export function WalletPanel({
             address: activeWalletAddress as `0x${string}`,
             sponsor: true,
             uiOptions: {
-              ...buildTxUiOptions({ mode: 'transfer' }),
+              ...buildTxUiOptions({
+                mode: 'transfer',
+                amountLabel: formatTxAmountLabel(transferAmount),
+              }),
               showWalletUIs,
             },
           }
@@ -1467,7 +1479,10 @@ export function WalletPanel({
             address: activeWalletAddress as `0x${string}`,
             sponsor: shouldSponsorTransactions,
             uiOptions: {
-              ...buildTxUiOptions({ mode: 'approve' }),
+              ...buildTxUiOptions({
+                mode: 'approve',
+                amountLabel: formatTxAmountLabel(totalBurn),
+              }),
               showWalletUIs,
             },
           }
@@ -1516,6 +1531,7 @@ export function WalletPanel({
           uiOptions: {
             ...buildTxUiOptions({
               mode: 'burn',
+              amountLabel: formatTxAmountLabel(totalBurn),
               destinationLabel: destinationConfig.label,
             }),
             showWalletUIs,
