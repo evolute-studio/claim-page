@@ -2240,7 +2240,7 @@ export function WalletPanel({
                     ? openPayoutExplorerUrl(item.chain, item.tx_hash)
                     : '';
                   const issuedDate = formatPayoutDate(item.created_at);
-                  const rowHeight = 134;
+                  const rowHeight = canClaim ? 134 : 96;
 
                   return (
                     <div
@@ -2261,7 +2261,7 @@ export function WalletPanel({
                           <div
                             className={`history-flip-face history-flip-face--front rounded-2xl border border-white/[0.08] transition-colors duration-200 group-hover:border-white/[0.14] ${
                               shouldUseClaimableShimmer ? 'claimable-metal-pill' : 'bg-white/[0.015]'
-                            } p-4`}
+                            } ${canClaim ? 'p-4' : 'p-3'}`}
                           >
                             <div className="flex h-full flex-col">
                               <div className="flex items-center justify-between gap-3">
