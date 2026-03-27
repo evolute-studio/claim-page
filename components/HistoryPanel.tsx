@@ -4,11 +4,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { getIdentityToken, useIdentityToken, usePrivy } from '@privy-io/react-auth';
 import { ChevronDown, Inbox, RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
-import { authDebug, createAuthTraceId, isAuthDebugEnabled, tokenFingerprint } from '@/lib/authDebug';
-import { getMyPayouts, getMyWithdrawals } from '@/lib/api';
+import { getMyWithdrawals } from '@/lib/api';
 import { getCctpConfig, getDestinationChains } from '@/lib/cctp';
 import { getExplorerTxUrl } from '@/lib/explorer';
-import { readJwtSub, resolvePrivyIdentityToken } from '@/lib/identityToken';
+import { resolvePrivyIdentityToken } from '@/lib/identityToken';
 import { StatusBadge } from '@/components/StatusBadge';
 import { WithdrawalStatusBadge } from '@/components/WithdrawalStatusBadge';
 import { truncateAddress } from '@/lib/format';
@@ -88,15 +87,21 @@ export function HistoryPanel({
   focusToken,
   focusPayoutRef,
   focusWithdrawalRef,
+  payouts = [],
+  payoutsLoading = false,
+  payoutsError = null,
+  refreshPayouts,
   payoutPollTick = 0,
-  onRefreshLinkedPayouts,
   isActive = true,
 }: {
   focusToken?: string | null;
   focusPayoutRef?: string | null;
   focusWithdrawalRef?: string | null;
+  payouts?: PayoutPreview[];
+  payoutsLoading?: boolean;
+  payoutsError?: string | null;
+  refreshPayouts?: (mode?: 'initial' | 'background') => Promise<void> | void;
   payoutPollTick?: number;
-  onRefreshLinkedPayouts?: () => void;
   isActive?: boolean;
 }) {
   const { identityToken } = useIdentityToken();
@@ -105,11 +110,10 @@ export function HistoryPanel({
   const config = useMemo(() => getCctpConfig(), []);
   const destinations = useMemo(() => getDestinationChains(config.sourceChain), [config.sourceChain]);
   const [view, setView] = useState<HistoryView>('incomes');
-  const [loading, setLoading] = useState(true);
+  const [withdrawalsLoading, setWithdrawalsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshIconSpinning, setRefreshIconSpinning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [payouts, setPayouts] = useState<PayoutPreview[]>([]);
+  const [withdrawalsError, setWithdrawalsError] = useState<string | null>(null);
   const [withdrawals, setWithdrawals] = useState<WithdrawalListItem[]>([]);
   const [expandedIncomeId, setExpandedIncomeId] = useState<string | null>(null);
   const [expandedOutcomeId, setExpandedOutcomeId] = useState<string | null>(null);
@@ -133,8 +137,7 @@ export function HistoryPanel({
   const pendingScrollRestoreRef = useRef<{ incomes: number; outcomes: number } | null>(null);
   const lastHandledIncomeFocusSignatureRef = useRef<string | null>(null);
   const lastHandledOutcomeFocusSignatureRef = useRef<string | null>(null);
-  const lastFocusRefreshSignatureRef = useRef<string | null>(null);
-  const lastHandledPayoutPollTickRef = useRef<number | null>(null);
+  const lastHandledHistoryPollTickRef = useRef<number | null>(null);
   const refreshSpinHasFullTurnRef = useRef(false);
   const refreshSpinStopRequestedRef = useRef(false);
   const lastErrorToastRef = useRef<string | null>(null);
@@ -161,8 +164,8 @@ export function HistoryPanel({
       if (!privyUserIdRef.current?.trim()) return;
       const showRefreshIndicator = options.showRefreshIndicator ?? false;
       if (mode === 'initial') {
-        setLoading(true);
-        setError(null);
+        setWithdrawalsLoading(true);
+        setWithdrawalsError(null);
       } else if (showRefreshIndicator) {
         setRefreshing(true);
         pendingScrollRestoreRef.current = {
@@ -172,85 +175,55 @@ export function HistoryPanel({
       }
       try {
         const token = await getAuthToken();
-        const traceId = createAuthTraceId('history-payouts');
-        const debugEnabled = isAuthDebugEnabled();
-        authDebug('payouts.request', {
-          source: 'HistoryPanel.loadHistory',
-          mode,
-          trace_id: traceId,
-          expected_privy_user_id: currentPrivyUserId || null,
-          token_sub: readJwtSub(token),
-          token_fp: tokenFingerprint(token),
-        });
-        const [payoutData, withdrawalData] = await Promise.all([
-          getMyPayouts(
-            token,
-            undefined,
-            {
-              statuses: 'ALL',
-              ...(debugEnabled
-                ? {
-                    debugTraceId: traceId,
-                    debugSource: 'HistoryPanel.loadHistory',
-                    debugExpectedSub: currentPrivyUserId || undefined,
-                  }
-                : {}),
-            }
-          ),
-          getMyWithdrawals(token),
-        ]);
-        setPayouts(payoutData.payouts);
+        const withdrawalData = await getMyWithdrawals(token);
         setWithdrawals(withdrawalData.withdrawals);
-        setError(null);
+        setWithdrawalsError(null);
       } catch (requestError) {
         const message =
           requestError instanceof Error ? requestError.message : 'Failed to load history';
-        setError(message);
+        setWithdrawalsError(message);
       } finally {
         if (mode === 'initial') {
-          setLoading(false);
+          setWithdrawalsLoading(false);
         } else if (showRefreshIndicator) {
           setRefreshing(false);
         }
       }
     },
-    [currentPrivyUserId, getAuthToken]
+    [getAuthToken]
   );
 
   useEffect(() => {
     if (!currentPrivyUserId) return;
     if (didInitialLoadRef.current) return;
     didInitialLoadRef.current = true;
-    lastHandledPayoutPollTickRef.current = payoutPollTick;
+    lastHandledHistoryPollTickRef.current = payoutPollTick;
     void loadHistory('initial');
   }, [currentPrivyUserId, loadHistory, payoutPollTick]);
 
   useEffect(() => {
     if (!currentPrivyUserId) return;
-    if (!focusToken && !focusPayoutRef && !focusWithdrawalRef) return;
-    if (loading) return;
-    const signature = `${focusToken ?? ''}|${focusPayoutRef ?? ''}|${focusWithdrawalRef ?? ''}`;
-    if (lastFocusRefreshSignatureRef.current === signature) return;
-    lastFocusRefreshSignatureRef.current = signature;
+    if (!focusWithdrawalRef) return;
+    if (withdrawalsLoading) return;
     void loadHistory('background');
-  }, [currentPrivyUserId, focusPayoutRef, focusToken, focusWithdrawalRef, loadHistory, loading]);
+  }, [currentPrivyUserId, focusWithdrawalRef, loadHistory, withdrawalsLoading]);
 
   useEffect(() => {
     if (!currentPrivyUserId) return;
-    if (loading) return;
-    if (lastHandledPayoutPollTickRef.current === payoutPollTick) return;
-    lastHandledPayoutPollTickRef.current = payoutPollTick;
+    if (withdrawalsLoading) return;
+    if (lastHandledHistoryPollTickRef.current === payoutPollTick) return;
+    lastHandledHistoryPollTickRef.current = payoutPollTick;
     void loadHistory('background');
-  }, [currentPrivyUserId, loadHistory, loading, payoutPollTick]);
+  }, [currentPrivyUserId, loadHistory, payoutPollTick, withdrawalsLoading]);
   useEffect(() => {
-    if (!error) {
+    if (!withdrawalsError) {
       lastErrorToastRef.current = null;
       return;
     }
-    if (lastErrorToastRef.current === error) return;
-    lastErrorToastRef.current = error;
-    toast.error('History unavailable', { description: error });
-  }, [error]);
+    if (lastErrorToastRef.current === withdrawalsError) return;
+    lastErrorToastRef.current = withdrawalsError;
+    toast.error('History unavailable', { description: withdrawalsError });
+  }, [withdrawalsError]);
 
   useLayoutEffect(() => {
     const pending = pendingScrollRestoreRef.current;
@@ -464,8 +437,12 @@ export function HistoryPanel({
   const handleManualRefresh = useCallback(() => {
     if (refreshing || refreshIconSpinning) return;
     void loadHistory('background', { showRefreshIndicator: true });
-    onRefreshLinkedPayouts?.();
-  }, [loadHistory, onRefreshLinkedPayouts, refreshIconSpinning, refreshing]);
+    void refreshPayouts?.('background');
+  }, [loadHistory, refreshIconSpinning, refreshPayouts, refreshing]);
+
+  const loading = payoutsLoading || withdrawalsLoading;
+  const incomesUnavailable = !!payoutsError;
+  const outcomesUnavailable = !!withdrawalsError;
 
   return (
     <section className="flex h-full min-h-0 w-full flex-col gap-4 rounded-2xl border border-white/10 bg-[#111111] p-5 animate-fade-in-up">
@@ -566,7 +543,7 @@ export function HistoryPanel({
           >
             <div className="min-h-0 h-full w-1/2 pr-1">
               {incomes.length === 0 ? (
-                <EmptyHistoryState view="incomes" unavailable={!!error} />
+                <EmptyHistoryState view="incomes" unavailable={incomesUnavailable} />
               ) : (
                 <div
                   ref={incomesListRef}
@@ -713,7 +690,7 @@ export function HistoryPanel({
 
             <div className="min-h-0 h-full w-1/2 pl-1">
               {outcomes.length === 0 ? (
-                <EmptyHistoryState view="outcomes" unavailable={!!error} />
+                <EmptyHistoryState view="outcomes" unavailable={outcomesUnavailable} />
               ) : (
                 <div
                   ref={outcomesListRef}

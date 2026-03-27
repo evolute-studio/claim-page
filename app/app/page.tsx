@@ -2,15 +2,26 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useCreateWallet, usePrivy, useWallets } from '@privy-io/react-auth';
+import {
+  getIdentityToken,
+  useCreateWallet,
+  useIdentityToken,
+  usePrivy,
+  useWallets,
+} from '@privy-io/react-auth';
 import { Check, Copy } from 'lucide-react';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { WalletPanel } from '@/components/WalletPanel';
 import { HistoryPanel } from '@/components/HistoryPanel';
+import { getMyPayouts } from '@/lib/api';
+import { authDebug, createAuthTraceId, isAuthDebugEnabled, tokenFingerprint } from '@/lib/authDebug';
 import { truncateAddress } from '@/lib/format';
+import { readJwtSub, resolvePrivyIdentityToken } from '@/lib/identityToken';
+import type { PayoutPreview } from '@/types/payout';
 
 type AppTab = 'wallet' | 'history';
 type AppDebugScreen = 'loading' | 'setup' | 'app';
+type RefreshPayoutsMode = 'initial' | 'background';
 
 function AccountIcon() {
   return (
@@ -85,14 +96,22 @@ export default function AppPage() {
   const searchParams = useSearchParams();
   const { wallets, ready: walletsReady } = useWallets();
   const { createWallet } = useCreateWallet();
-  const { ready, authenticated } = usePrivy();
+  const { identityToken } = useIdentityToken();
+  const { ready, authenticated, user } = usePrivy();
+  const currentPrivyUserId = user?.id?.trim() ?? '';
+  const identityTokenRef = useRef<string | null>(identityToken ?? null);
+  const privyUserIdRef = useRef<string | null>(user?.id ?? null);
+  const didInitialPayoutLoadRef = useRef(false);
+  const lastHandledPayoutPollTickRef = useRef<number | null>(null);
   const [focusToken, setFocusToken] = useState<string | null>(null);
   const [focusPayoutRef, setFocusPayoutRef] = useState<string | null>(null);
   const [focusWithdrawalRef, setFocusWithdrawalRef] = useState<string | null>(null);
   const [focusTargetTab, setFocusTargetTab] = useState<AppTab | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>('wallet');
   const [payoutPollTick, setPayoutPollTick] = useState(0);
-  const [walletPayoutRefreshNonce, setWalletPayoutRefreshNonce] = useState(0);
+  const [payouts, setPayouts] = useState<PayoutPreview[]>([]);
+  const [payoutsLoading, setPayoutsLoading] = useState(false);
+  const [payoutsError, setPayoutsError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isCreatingEmbeddedWallet, setIsCreatingEmbeddedWallet] = useState(false);
   const queryFocusToken = searchParams.get('focusToken');
@@ -111,6 +130,14 @@ export default function AppPage() {
   useEffect(() => {
     routerRef.current = router;
   }, [router]);
+
+  useEffect(() => {
+    identityTokenRef.current = identityToken ?? null;
+  }, [identityToken]);
+
+  useEffect(() => {
+    privyUserIdRef.current = user?.id ?? null;
+  }, [user]);
 
   useEffect(() => {
     if (isDebugPreview) return;
@@ -173,6 +200,82 @@ export default function AppPage() {
     return () => window.clearInterval(timerId);
   }, [authenticated, isDebugPreview, ready]);
 
+  useEffect(() => {
+    if (currentPrivyUserId) return;
+    didInitialPayoutLoadRef.current = false;
+    lastHandledPayoutPollTickRef.current = null;
+    setPayouts([]);
+    setPayoutsLoading(false);
+    setPayoutsError(null);
+  }, [currentPrivyUserId]);
+
+  const getAuthToken = useCallback(async () => {
+    return resolvePrivyIdentityToken({
+      cachedToken: identityTokenRef.current,
+      expectedPrivyUserId: privyUserIdRef.current,
+      fetchFreshToken: () => getIdentityToken(),
+      source: 'AppPage.getAuthToken',
+    });
+  }, []);
+
+  const refreshPayouts = useCallback(
+    async (mode: RefreshPayoutsMode = 'background') => {
+      if (isDebugPreview) return;
+      if (!privyUserIdRef.current?.trim()) return;
+      const shouldShowLoading =
+        mode === 'initial' && !didInitialPayoutLoadRef.current && payouts.length === 0;
+      if (shouldShowLoading) setPayoutsLoading(true);
+      setPayoutsError(null);
+      try {
+        const token = await getAuthToken();
+        const traceId = createAuthTraceId('app-payouts');
+        const debugEnabled = isAuthDebugEnabled();
+        authDebug('payouts.request', {
+          source: 'AppPage.refreshPayouts',
+          mode,
+          trace_id: traceId,
+          expected_privy_user_id: currentPrivyUserId || null,
+          token_sub: readJwtSub(token),
+          token_fp: tokenFingerprint(token),
+        });
+        const data = await getMyPayouts(
+          token,
+          undefined,
+          {
+            statuses: 'ALL',
+            ...(debugEnabled
+              ? {
+                  debugTraceId: traceId,
+                  debugSource: 'AppPage.refreshPayouts',
+                  debugExpectedSub: currentPrivyUserId || undefined,
+                }
+              : {}),
+          }
+        );
+        setPayouts(data.payouts);
+        setPayoutsError(null);
+        didInitialPayoutLoadRef.current = true;
+      } catch (requestError) {
+        const message =
+          requestError instanceof Error ? requestError.message : 'Failed to load payouts';
+        setPayoutsError(message);
+      } finally {
+        if (shouldShowLoading) setPayoutsLoading(false);
+      }
+    },
+    [currentPrivyUserId, getAuthToken, isDebugPreview, payouts.length]
+  );
+
+  useEffect(() => {
+    if (isDebugPreview) return;
+    if (!currentPrivyUserId) return;
+    if (lastHandledPayoutPollTickRef.current === payoutPollTick && didInitialPayoutLoadRef.current) {
+      return;
+    }
+    lastHandledPayoutPollTickRef.current = payoutPollTick;
+    void refreshPayouts(didInitialPayoutLoadRef.current ? 'background' : 'initial');
+  }, [currentPrivyUserId, isDebugPreview, payoutPollTick, refreshPayouts]);
+
   const buildAppUrl = useCallback(
     (
       tab: AppTab,
@@ -233,10 +336,6 @@ export default function AppPage() {
     },
     [buildAppUrl, router]
   );
-
-  const handleHistoryRefreshLinkedPayouts = useCallback(() => {
-    setWalletPayoutRefreshNonce((current) => current + 1);
-  }, []);
 
   const copyText = useCallback(async (value: string): Promise<boolean> => {
     try {
@@ -398,8 +497,10 @@ export default function AppPage() {
                 isActive={activeTab === 'wallet'}
                 focusToken={focusTargetTab === 'wallet' ? focusToken : null}
                 focusPayoutRef={focusTargetTab === 'wallet' ? focusPayoutRef : null}
-                payoutPollTick={payoutPollTick}
-                manualRefreshNonce={walletPayoutRefreshNonce}
+                payouts={payouts}
+                payoutsLoading={payoutsLoading}
+                payoutsError={payoutsError}
+                refreshPayouts={refreshPayouts}
                 debugPreview={isDebugPreview}
                 onClaimedPayoutFocus={handleClaimedPayoutFocus}
                 onCreatedWithdrawalFocus={handleCreatedWithdrawalFocus}
@@ -414,8 +515,11 @@ export default function AppPage() {
                 focusToken={focusTargetTab === 'history' ? focusToken : null}
                 focusPayoutRef={focusTargetTab === 'history' ? focusPayoutRef : null}
                 focusWithdrawalRef={focusTargetTab === 'history' ? focusWithdrawalRef : null}
+                payouts={payouts}
+                payoutsLoading={payoutsLoading}
+                payoutsError={payoutsError}
+                refreshPayouts={refreshPayouts}
                 payoutPollTick={payoutPollTick}
-                onRefreshLinkedPayouts={handleHistoryRefreshLinkedPayouts}
                 isActive={activeTab === 'history'}
               />
             </div>

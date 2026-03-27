@@ -26,14 +26,13 @@ import {
   confirmClaim,
   confirmClaimByPayoutId,
   createWithdrawal,
-  getMyPayouts,
   getWithdrawalQuote,
   WithdrawalApiError,
   submitBurnTx,
 } from '@/lib/api';
 import { getCctpConfig, getDestinationChains, getDestinationConfig } from '@/lib/cctp';
 import { getExplorerTxUrl } from '@/lib/explorer';
-import { authDebug, createAuthTraceId, isAuthDebugEnabled, tokenFingerprint } from '@/lib/authDebug';
+import { authDebug, tokenFingerprint } from '@/lib/authDebug';
 import { readJwtSub, resolvePrivyIdentityToken } from '@/lib/identityToken';
 import { WithdrawStepAmount } from '@/components/withdraw/WithdrawStepAmount';
 import { WithdrawStepNetwork } from '@/components/withdraw/WithdrawStepNetwork';
@@ -434,8 +433,10 @@ export function WalletPanel({
   isActive = true,
   focusToken = null,
   focusPayoutRef = null,
-  payoutPollTick = 0,
-  manualRefreshNonce = 0,
+  payouts = [],
+  payoutsLoading = false,
+  payoutsError = null,
+  refreshPayouts,
   debugPreview = false,
   onClaimedPayoutFocus,
   onCreatedWithdrawalFocus,
@@ -443,8 +444,10 @@ export function WalletPanel({
   isActive?: boolean;
   focusToken?: string | null;
   focusPayoutRef?: string | null;
-  payoutPollTick?: number;
-  manualRefreshNonce?: number;
+  payouts?: PayoutPreview[];
+  payoutsLoading?: boolean;
+  payoutsError?: string | null;
+  refreshPayouts?: (mode?: 'initial' | 'background') => Promise<void> | void;
   debugPreview?: boolean;
   onClaimedPayoutFocus?: (next: { focusToken?: string | null; focusPayoutRef?: string | null }) => void;
   onCreatedWithdrawalFocus?: (next: { focusWithdrawalRef?: string | null }) => void;
@@ -463,7 +466,6 @@ export function WalletPanel({
   }, [config.sourceChain]);
   const identityTokenRef = useRef<string | null>(identityToken ?? null);
   const privyUserIdRef = useRef<string | null>(user?.id ?? null);
-  const didInitialClaimableLoadRef = useRef(false);
 
   useEffect(() => {
     identityTokenRef.current = identityToken ?? null;
@@ -499,10 +501,8 @@ export function WalletPanel({
   const [step, setStep] = useState<WithdrawStep>(1);
   const [debugEvents, setDebugEvents] = useState<WithdrawDebugEvent[]>([]);
   const [showDebug, setShowDebug] = useState(false);
-  const [claimablePayouts, setClaimablePayouts] = useState<PayoutPreview[]>([]);
-  const [claimablePayoutsLoading, setClaimablePayoutsLoading] = useState(false);
-  const [claimablePayoutsError, setClaimablePayoutsError] = useState<string | null>(null);
   const [claimingPayoutId, setClaimingPayoutId] = useState<string | null>(null);
+  const [claimableActionError, setClaimableActionError] = useState<string | null>(null);
   const [highlightedClaimableId, setHighlightedClaimableId] = useState<string | null>(null);
   const [flippedClaimableId, setFlippedClaimableId] = useState<string | null>(null);
   const [claimablePayoutsScrolling, setClaimablePayoutsScrolling] = useState(false);
@@ -511,8 +511,6 @@ export function WalletPanel({
   const claimableHighlightTimeoutRef = useRef<number | null>(null);
   const claimableRowRefsRef = useRef<Record<string, HTMLDivElement | null>>({});
   const lastHandledClaimableFocusSignatureRef = useRef<string | null>(null);
-  const lastHandledClaimablePollTickRef = useRef<number | null>(null);
-  const lastHandledManualClaimableRefreshRef = useRef<number>(0);
   const networkIconsPreloadedRef = useRef(false);
   const submitInFlightRef = useRef(false);
   const pendingCreateRef = useRef<{
@@ -836,6 +834,7 @@ export function WalletPanel({
     toast.error('Quote unavailable', { description: quoteError });
   }, [quoteError]);
   useEffect(() => {
+    const claimablePayoutsError = claimableActionError ?? (debugPreview ? null : payoutsError);
     if (!claimablePayoutsError) {
       lastClaimableToastRef.current = null;
       return;
@@ -843,7 +842,7 @@ export function WalletPanel({
     if (lastClaimableToastRef.current === claimablePayoutsError) return;
     lastClaimableToastRef.current = claimablePayoutsError;
     toast.error('Unable to load claimable payouts', { description: claimablePayoutsError });
-  }, [claimablePayoutsError]);
+  }, [claimableActionError, debugPreview, payoutsError]);
 
   const baseExplorerBase = useMemo(() => {
     return config.sourceChain.id === 84532
@@ -1738,68 +1737,6 @@ export function WalletPanel({
     return getExplorerTxUrl(chain, txHash, { forceBaseSepolia: config.sourceChain.id === 84532 });
   }, [config.sourceChain.id]);
 
-  const loadClaimablePayouts = useCallback(
-    async (mode: 'initial' | 'background' = 'background') => {
-      const shouldShowLoading =
-        mode === 'initial' && !didInitialClaimableLoadRef.current && claimablePayouts.length === 0;
-      const isNoClaimablePayoutsMessage = (message: string): boolean => {
-        return message.toLowerCase().includes('no claimable');
-      };
-      if (shouldShowLoading) setClaimablePayoutsLoading(true);
-      setClaimablePayoutsError(null);
-      try {
-        const token = await getAuthToken();
-        const traceId = createAuthTraceId('wallet-payouts');
-        const debugEnabled = isAuthDebugEnabled();
-        authDebug('payouts.request', {
-          source: 'WalletPanel.loadClaimablePayouts',
-          mode,
-          trace_id: traceId,
-          expected_privy_user_id: currentPrivyUserId || null,
-          token_sub: readJwtSub(token),
-          token_fp: tokenFingerprint(token),
-        });
-        const response = await getMyPayouts(
-          token,
-          undefined,
-          {
-            statuses: WALLET_ACTIVE_PAYOUT_STATUSES,
-            ...(debugEnabled
-              ? {
-                  debugTraceId: traceId,
-                  debugSource: 'WalletPanel.loadClaimablePayouts',
-                  debugExpectedSub: currentPrivyUserId || undefined,
-                }
-              : {}),
-          }
-        );
-        const claimable = response.payouts
-          .filter((item) => isWalletActivePayoutStatus(item.status))
-          .sort((a, b) => {
-            const priorityDiff =
-              getWalletPayoutSortPriority(a.status) - getWalletPayoutSortPriority(b.status);
-            if (priorityDiff !== 0) return priorityDiff;
-            return getWalletPayoutSortTimestamp(b) - getWalletPayoutSortTimestamp(a);
-          });
-        setClaimablePayouts(claimable);
-        didInitialClaimableLoadRef.current = true;
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'Failed to load claimable payouts';
-        if (isNoClaimablePayoutsMessage(message)) {
-          setClaimablePayouts([]);
-          didInitialClaimableLoadRef.current = true;
-          setClaimablePayoutsError(null);
-        } else {
-          setClaimablePayoutsError(message);
-        }
-      } finally {
-        if (shouldShowLoading) setClaimablePayoutsLoading(false);
-      }
-    },
-    [claimablePayouts.length, currentPrivyUserId, getAuthToken]
-  );
-
   const handleClaimablePayoutClaim = useCallback(
     async (item: PayoutPreview) => {
       if (!activeWalletAddress) return;
@@ -1809,7 +1746,7 @@ export function WalletPanel({
       let focusPayoutRef: string | null = payoutId ?? item.id ?? item.claim_token ?? null;
 
       setClaimingPayoutId(itemId);
-      setClaimablePayoutsError(null);
+      setClaimableActionError(null);
       try {
         const token = await getAuthToken();
         authDebug('claim.request', {
@@ -1838,7 +1775,7 @@ export function WalletPanel({
           const confirmResponse = await confirmClaimByPayoutId(payoutId, activeWalletAddress, token);
           focusPayoutRef = confirmResponse.payout_id ?? focusPayoutRef;
         }
-        await loadClaimablePayouts('background');
+        await refreshPayouts?.('background');
         setFlippedClaimableId(null);
         onClaimedPayoutFocus?.({
           focusToken: item.claim_token ?? null,
@@ -1846,7 +1783,7 @@ export function WalletPanel({
         });
       } catch (claimError) {
         const message = claimError instanceof Error ? claimError.message : 'Claim failed';
-        setClaimablePayoutsError(
+        setClaimableActionError(
           message === 'Missing claim token'
             ? 'Server expects claim token for this payout. Check `/payouts/me` response fields.'
             : message
@@ -1855,57 +1792,8 @@ export function WalletPanel({
         setClaimingPayoutId(null);
       }
     },
-    [activeWalletAddress, currentPrivyUserId, getAuthToken, loadClaimablePayouts, onClaimedPayoutFocus]
+    [activeWalletAddress, currentPrivyUserId, getAuthToken, onClaimedPayoutFocus, refreshPayouts]
   );
-
-  useEffect(() => {
-    if (!debugPreview) return;
-    const now = Date.now();
-    const statuses: PayoutPreview['status'][] = WALLET_ACTIVE_PAYOUT_STATUSES;
-    const mock = statuses.map((status, index) => ({
-      ...(status === 'CREATED'
-        ? {
-            payout_id: 'debug-payout-created',
-            claim_token: 'debug-claim-created',
-          }
-        : {}),
-      tournament_name: `Debug ${status}`,
-      asset: 'USDC',
-      chain: 'base',
-      amount_minor_units: (1_500_000 + index * 175_000),
-      amount_formatted: ((1_500_000 + index * 175_000) / 1_000_000).toFixed(2),
-      status,
-      expires_at: now + 60 * 60 * 1000,
-      created_at: now - (index + 6) * 60_000,
-      updated_at: now - (index + 1) * 60_000,
-      recipient_email: 'player@example.com',
-    }));
-    setClaimablePayouts(mock);
-    setClaimablePayoutsError(null);
-    setClaimablePayoutsLoading(false);
-    didInitialClaimableLoadRef.current = true;
-  }, [debugPreview]);
-
-  useEffect(() => {
-    if (debugPreview) return;
-    if (!currentPrivyUserId) return;
-    if (withdrawOpen) return;
-    if (lastHandledClaimablePollTickRef.current === payoutPollTick && didInitialClaimableLoadRef.current) {
-      return;
-    }
-    lastHandledClaimablePollTickRef.current = payoutPollTick;
-    void loadClaimablePayouts(didInitialClaimableLoadRef.current ? 'background' : 'initial');
-  }, [currentPrivyUserId, debugPreview, loadClaimablePayouts, payoutPollTick, withdrawOpen]);
-
-  useEffect(() => {
-    if (debugPreview) return;
-    if (!currentPrivyUserId) return;
-    if (withdrawOpen) return;
-    if (manualRefreshNonce <= 0) return;
-    if (lastHandledManualClaimableRefreshRef.current === manualRefreshNonce) return;
-    lastHandledManualClaimableRefreshRef.current = manualRefreshNonce;
-    void loadClaimablePayouts('background');
-  }, [currentPrivyUserId, debugPreview, loadClaimablePayouts, manualRefreshNonce, withdrawOpen]);
 
   useEffect(() => {
     return () => {
@@ -1938,6 +1826,45 @@ export function WalletPanel({
     if (!claimableScrollArmedRef.current) return;
     markClaimablePayoutsScrolling();
   }, [markClaimablePayoutsScrolling]);
+
+  const debugClaimablePayouts = useMemo(() => {
+    if (!debugPreview) return [];
+    const now = Date.now();
+    const statuses: PayoutPreview['status'][] = WALLET_ACTIVE_PAYOUT_STATUSES;
+    return statuses.map((status, index) => ({
+      ...(status === 'CREATED'
+        ? {
+            payout_id: 'debug-payout-created',
+            claim_token: 'debug-claim-created',
+          }
+        : {}),
+      tournament_name: `Debug ${status}`,
+      asset: 'USDC',
+      chain: 'base',
+      amount_minor_units: 1_500_000 + index * 175_000,
+      amount_formatted: ((1_500_000 + index * 175_000) / 1_000_000).toFixed(2),
+      status,
+      expires_at: now + 60 * 60 * 1000,
+      created_at: now - (index + 6) * 60_000,
+      updated_at: now - (index + 1) * 60_000,
+      recipient_email: 'player@example.com',
+    }));
+  }, [debugPreview]);
+
+  const claimablePayouts = useMemo(() => {
+    const source = debugPreview ? debugClaimablePayouts : payouts;
+    return [...source]
+      .filter((item) => isWalletActivePayoutStatus(item.status))
+      .sort((a, b) => {
+        const priorityDiff =
+          getWalletPayoutSortPriority(a.status) - getWalletPayoutSortPriority(b.status);
+        if (priorityDiff !== 0) return priorityDiff;
+        return getWalletPayoutSortTimestamp(b) - getWalletPayoutSortTimestamp(a);
+      });
+  }, [debugClaimablePayouts, debugPreview, payouts]);
+
+  const claimablePayoutsLoading = debugPreview ? false : payoutsLoading;
+  const claimablePayoutsError = claimableActionError ?? (debugPreview ? null : payoutsError);
 
   const focusedClaimableId = useMemo(() => {
     const focused = claimablePayouts.find((item) => {
