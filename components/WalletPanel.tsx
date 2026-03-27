@@ -1827,11 +1827,12 @@ export function WalletPanel({
     markClaimablePayoutsScrolling();
   }, [markClaimablePayoutsScrolling]);
 
-  const debugClaimablePayouts = useMemo(() => {
+  const debugClaimablePayouts = useMemo<PayoutPreview[]>(() => {
     if (!debugPreview) return [];
     const now = Date.now();
     const statuses: PayoutPreview['status'][] = WALLET_ACTIVE_PAYOUT_STATUSES;
     return statuses.map((status, index) => ({
+      id: `debug-wallet-payout-${status.toLowerCase()}-${index}`,
       ...(status === 'CREATED'
         ? {
             payout_id: 'debug-payout-created',
