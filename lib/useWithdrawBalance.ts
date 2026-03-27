@@ -7,6 +7,7 @@ import {
   WalletApiError,
   type WalletBalanceResponse,
 } from '@/lib/api';
+import { useDocumentVisibility } from '@/lib/useDocumentVisibility';
 
 export type WithdrawBalanceSource = 'server' | 'balance_of';
 
@@ -85,10 +86,7 @@ export function useWithdrawBalance({
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [balanceRefreshNonce, setBalanceRefreshNonce] = useState(0);
-  const [isDocumentVisible, setIsDocumentVisible] = useState(() => {
-    if (typeof document === 'undefined') return true;
-    return document.visibilityState === 'visible';
-  });
+  const { isDocumentVisible } = useDocumentVisibility();
 
   const requestIdRef = useRef(0);
   const syncInFlightRef = useRef(false);
@@ -138,21 +136,9 @@ export function useWithdrawBalance({
   }, [activeWalletAddress]);
 
   useEffect(() => {
-    if (typeof document === 'undefined') return;
-
-    const handleVisibilityChange = () => {
-      const visible = document.visibilityState === 'visible';
-      setIsDocumentVisible(visible);
-      if (visible) {
-        requestSync();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [requestSync]);
+    if (!isDocumentVisible) return;
+    requestSync();
+  }, [isDocumentVisible, requestSync]);
 
   useEffect(() => {
     if (!enabled || !activeWalletAddress) return;
@@ -168,7 +154,7 @@ export function useWithdrawBalance({
   }, [activeWalletAddress, enabled, isDocumentVisible, refreshIntervalMs, requestSync]);
 
   useEffect(() => {
-    if (!enabled || !activeWalletAddress) return;
+    if (!enabled || !activeWalletAddress || !isDocumentVisible) return;
 
     let cancelled = false;
     const requestId = ++requestIdRef.current;
@@ -274,6 +260,7 @@ export function useWithdrawBalance({
     balanceRefreshNonce,
     enabled,
     getAuthToken,
+    isDocumentVisible,
     publicClient,
     source,
     tokenAddress,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DestinationChain } from '@/types/withdrawal';
+import { useDocumentVisibility } from '@/lib/useDocumentVisibility';
 import { withTimeout } from '@/lib/withdraw';
 
 const BASE_RETRY_DELAY_MS = 3_000;
@@ -43,6 +44,7 @@ export function useNetworkFeeEstimates({
   const [networkFeeError, setNetworkFeeError] = useState<string | null>(null);
   const [networkFeeLoading, setNetworkFeeLoading] = useState(false);
   const [networkFeeRetryNonce, setNetworkFeeRetryNonce] = useState(0);
+  const { isDocumentVisible } = useDocumentVisibility();
 
   const requestIdRef = useRef(0);
   const inFlightRef = useRef(false);
@@ -64,6 +66,8 @@ export function useNetworkFeeEstimates({
   }, []);
 
   useEffect(() => {
+    if (!isDocumentVisible) return;
+
     const shouldFetchEstimates =
       (withdrawOpen && step === 1) || (!withdrawOpen && prefetchWhenClosed);
     if (!shouldFetchEstimates) return;
@@ -232,6 +236,7 @@ export function useNetworkFeeEstimates({
     destinationChains,
     fetchFeeQuote,
     getAuthToken,
+    isDocumentVisible,
     networkFeeEstimates,
     networkFeeRetryNonce,
     prefetchWhenClosed,

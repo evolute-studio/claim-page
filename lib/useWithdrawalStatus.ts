@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { getWithdrawalStatus } from '@/lib/api';
+import { useDocumentVisibility } from '@/lib/useDocumentVisibility';
 import type { WithdrawalStatus } from '@/types/withdrawal';
 
 type DebugLogger = (stage: string, message: string, data?: Record<string, unknown>) => void;
@@ -23,6 +24,7 @@ export function useWithdrawalStatus({
   const [withdrawalStatus, setWithdrawalStatus] = useState<WithdrawalStatus | null>(null);
   const [burnTxHash, setBurnTxHash] = useState<string | null>(null);
   const [forwardTxHash, setForwardTxHash] = useState<string | null>(null);
+  const { isDocumentVisible } = useDocumentVisibility();
 
   const lastStatusRef = useRef<string | null>(null);
   const lastForwardHashRef = useRef<string | null>(null);
@@ -52,7 +54,7 @@ export function useWithdrawalStatus({
       withdrawalStatus === 'MINTED' ||
       withdrawalStatus === 'FAILED' ||
       withdrawalStatus === 'EXPIRED';
-    if (!withdrawalId || forwardTxHash || isTerminalStatus) return;
+    if (!withdrawalId || forwardTxHash || isTerminalStatus || !isDocumentVisible) return;
 
     let cancelled = false;
     const poll = async () => {
@@ -101,6 +103,7 @@ export function useWithdrawalStatus({
     debugEnabled,
     forwardTxHash,
     getAuthToken,
+    isDocumentVisible,
     onFailureReason,
     onPollingError,
     pushDebug,

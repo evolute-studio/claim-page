@@ -18,6 +18,7 @@ import { authDebug, createAuthTraceId, isAuthDebugEnabled, tokenFingerprint } fr
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { truncateAddress } from '@/lib/format';
 import { readJwtSub, resolvePrivyIdentityToken } from '@/lib/identityToken';
+import { useDocumentVisibility } from '@/lib/useDocumentVisibility';
 import type { PayoutPreview } from '@/types/payout';
 
 type AppTab = 'wallet' | 'history';
@@ -99,6 +100,7 @@ export default function AppPage() {
   const { createWallet } = useCreateWallet();
   const { identityToken } = useIdentityToken();
   const { ready, authenticated, user } = usePrivy();
+  const { isDocumentVisible } = useDocumentVisibility();
   const currentPrivyUserId = user?.id?.trim() ?? '';
   const identityTokenRef = useRef<string | null>(identityToken ?? null);
   const privyUserIdRef = useRef<string | null>(user?.id ?? null);
@@ -195,11 +197,12 @@ export default function AppPage() {
   useEffect(() => {
     if (!ready) return;
     if (!isDebugPreview && !authenticated) return;
+    if (!isDocumentVisible) return;
     const timerId = window.setInterval(() => {
       setPayoutPollTick((current) => current + 1);
     }, PAYOUT_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timerId);
-  }, [authenticated, isDebugPreview, ready]);
+  }, [authenticated, isDebugPreview, isDocumentVisible, ready]);
 
   useEffect(() => {
     if (currentPrivyUserId) return;

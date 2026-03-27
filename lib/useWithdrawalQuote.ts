@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getWithdrawalQuote } from '@/lib/api';
+import { useDocumentVisibility } from '@/lib/useDocumentVisibility';
 import { normalizeTimestamp, timeRemainingLabel, toNumberSafe } from '@/lib/withdraw';
 import type { DestinationChain, WithdrawalQuoteResponse } from '@/types/withdrawal';
 
@@ -40,6 +41,7 @@ export function useWithdrawalQuote({
   const [feeEstimateMinor, setFeeEstimateMinor] = useState<bigint>(0n);
   const [quoteRefreshNonce, setQuoteRefreshNonce] = useState(0);
   const [quoteTick, setQuoteTick] = useState(0);
+  const { isDocumentVisible } = useDocumentVisibility();
 
   const quoteRequestId = useRef(0);
 
@@ -77,7 +79,7 @@ export function useWithdrawalQuote({
   }, []);
 
   useEffect(() => {
-    if (!quote || !quoteExpiresAtMs || !activeWalletAddress) return;
+    if (!quote || !quoteExpiresAtMs || !activeWalletAddress || !isDocumentVisible) return;
     if (sending || isQuoteLocked) return;
 
     const delay = quoteExpiresAtMs - Date.now() + 250;
@@ -95,19 +97,19 @@ export function useWithdrawalQuote({
     }, delay);
 
     return () => window.clearTimeout(timerId);
-  }, [activeWalletAddress, isQuoteLocked, quote, quoteExpiresAtMs, quoteLoading, sending]);
+  }, [activeWalletAddress, isDocumentVisible, isQuoteLocked, quote, quoteExpiresAtMs, quoteLoading, sending]);
 
   useEffect(() => {
-    if (!quoteExpiresAtMs || isQuoteLocked) return;
+    if (!quoteExpiresAtMs || isQuoteLocked || !isDocumentVisible) return;
     setQuoteTick(Date.now());
     const timerId = window.setInterval(() => {
       setQuoteTick(Date.now());
     }, 1000);
     return () => window.clearInterval(timerId);
-  }, [quoteExpiresAtMs, isQuoteLocked]);
+  }, [isDocumentVisible, quoteExpiresAtMs, isQuoteLocked]);
 
   useEffect(() => {
-    if (destination === 'base') return;
+    if (destination === 'base' || !isDocumentVisible) return;
     if (step !== 4) return;
     if (sending || isQuoteLocked || quoteLoading) return;
     if (quote) return;
@@ -122,6 +124,7 @@ export function useWithdrawalQuote({
     activeWalletAddress,
     destination,
     feeEstimateMinor,
+    isDocumentVisible,
     isQuoteLocked,
     quote,
     quoteError,
@@ -174,7 +177,7 @@ export function useWithdrawalQuote({
       return;
     }
 
-    if (!quoteRequestAmount || !destination || !activeWalletAddress) {
+    if (!quoteRequestAmount || !destination || !activeWalletAddress || !isDocumentVisible) {
       setQuote(null);
       setQuoteError(null);
       setQuoteLoading(false);
@@ -262,6 +265,7 @@ export function useWithdrawalQuote({
     destination,
     feeEstimateMinor,
     getAuthToken,
+    isDocumentVisible,
     isQuoteLocked,
     parsedInputAmount,
     pushDebug,

@@ -43,6 +43,7 @@ import { useNetworkFeeEstimates } from '@/lib/useNetworkFeeEstimates';
 import { useWithdrawalQuote } from '@/lib/useWithdrawalQuote';
 import { useWithdrawalStatus } from '@/lib/useWithdrawalStatus';
 import { useWithdrawBalance } from '@/lib/useWithdrawBalance';
+import { useDocumentVisibility } from '@/lib/useDocumentVisibility';
 import {
   clampUsdcInput,
   formatUsdc,
@@ -66,6 +67,7 @@ const WITHDRAW_BALANCE_SOURCE =
   (process.env.NEXT_PUBLIC_WALLET_BALANCE_SOURCE ?? 'server').trim().toLowerCase() === 'balance_of'
     ? 'balance_of'
     : 'server';
+const RESUME_TOAST_GRACE_MS = 3000;
 
 type WithdrawDebugEvent = {
   ts: number;
@@ -455,6 +457,7 @@ export function WalletPanel({
   const { wallets } = useWallets();
   const { identityToken } = useIdentityToken();
   const { user } = usePrivy();
+  const { isDocumentVisible, lastBecameVisibleAt } = useDocumentVisibility();
   const currentPrivyUserId = user?.id?.trim() ?? '';
   const { sendTransaction } = useSendTransaction();
   const config = useMemo(() => getCctpConfig(), []);
@@ -807,6 +810,8 @@ export function WalletPanel({
     pushDebug('quote:error', 'Quote error', { message: quoteError });
   }, [quoteError, pushDebug]);
   useEffect(() => {
+    if (!isDocumentVisible) return;
+    if (Date.now() - lastBecameVisibleAt < RESUME_TOAST_GRACE_MS) return;
     if (!balanceError) {
       lastBalanceToastRef.current = null;
       return;
@@ -814,8 +819,10 @@ export function WalletPanel({
     if (lastBalanceToastRef.current === balanceError) return;
     lastBalanceToastRef.current = balanceError;
     toast.error('Balance unavailable', { description: balanceError });
-  }, [balanceError]);
+  }, [balanceError, isDocumentVisible, lastBecameVisibleAt]);
   useEffect(() => {
+    if (!isDocumentVisible) return;
+    if (Date.now() - lastBecameVisibleAt < RESUME_TOAST_GRACE_MS) return;
     if (!networkFeeError) {
       lastNetworkFeeToastRef.current = null;
       return;
@@ -823,8 +830,10 @@ export function WalletPanel({
     if (lastNetworkFeeToastRef.current === networkFeeError) return;
     lastNetworkFeeToastRef.current = networkFeeError;
     toast.error('Fee estimate unavailable', { description: networkFeeError });
-  }, [networkFeeError]);
+  }, [isDocumentVisible, lastBecameVisibleAt, networkFeeError]);
   useEffect(() => {
+    if (!isDocumentVisible) return;
+    if (Date.now() - lastBecameVisibleAt < RESUME_TOAST_GRACE_MS) return;
     if (!quoteError) {
       lastQuoteToastRef.current = null;
       return;
@@ -832,8 +841,10 @@ export function WalletPanel({
     if (lastQuoteToastRef.current === quoteError) return;
     lastQuoteToastRef.current = quoteError;
     toast.error('Quote unavailable', { description: quoteError });
-  }, [quoteError]);
+  }, [isDocumentVisible, lastBecameVisibleAt, quoteError]);
   useEffect(() => {
+    if (!isDocumentVisible) return;
+    if (Date.now() - lastBecameVisibleAt < RESUME_TOAST_GRACE_MS) return;
     const claimablePayoutsError = claimableActionError ?? (debugPreview ? null : payoutsError);
     if (!claimablePayoutsError) {
       lastClaimableToastRef.current = null;
@@ -842,7 +853,7 @@ export function WalletPanel({
     if (lastClaimableToastRef.current === claimablePayoutsError) return;
     lastClaimableToastRef.current = claimablePayoutsError;
     toast.error('Unable to load claimable payouts', { description: claimablePayoutsError });
-  }, [claimableActionError, debugPreview, payoutsError]);
+  }, [claimableActionError, debugPreview, isDocumentVisible, lastBecameVisibleAt, payoutsError]);
 
   const baseExplorerBase = useMemo(() => {
     return config.sourceChain.id === 84532
