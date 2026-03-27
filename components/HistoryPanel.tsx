@@ -813,19 +813,16 @@ export function HistoryPanel({
                                   label="To"
                                   value={
                                     item.dest_address ? (
-                                      <div className="flex flex-wrap items-baseline justify-end gap-x-1.5 gap-y-1 text-gray-200">
-                                        <span>{destinationLabel} •</span>
-                                        <CopyableAddress
-                                          value={item.dest_address}
-                                          displayValue={truncateAddress(item.dest_address)}
-                                          wrapperClassName="max-w-full items-baseline gap-1"
-                                          textButtonClassName="max-w-full items-baseline gap-1"
-                                          labelClassName="break-all text-gray-300"
-                                          iconButtonClassName="relative top-px h-4 w-4 text-gray-300"
-                                          copiedIconButtonClassName="relative top-px h-4 w-4 text-emerald-200"
-                                          copyLabel="Copy destination address"
-                                        />
-                                      </div>
+                                      <CopyableAddress
+                                        value={item.dest_address}
+                                        displayValue={truncateAddress(item.dest_address)}
+                                        wrapperClassName="ml-auto max-w-full items-baseline gap-1"
+                                        textButtonClassName="max-w-full items-baseline gap-1"
+                                        labelClassName="break-all text-gray-300"
+                                        iconButtonClassName="relative top-px h-4 w-4 text-gray-300"
+                                        copiedIconButtonClassName="relative top-px h-4 w-4 text-emerald-200"
+                                        copyLabel="Copy destination address"
+                                      />
                                     ) : (
                                       <p className="truncate">{destinationLabel}</p>
                                     )
