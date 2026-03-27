@@ -88,11 +88,15 @@ export function HistoryPanel({
   focusToken,
   focusPayoutRef,
   focusWithdrawalRef,
+  payoutPollTick = 0,
+  onRefreshLinkedPayouts,
   isActive = true,
 }: {
   focusToken?: string | null;
   focusPayoutRef?: string | null;
   focusWithdrawalRef?: string | null;
+  payoutPollTick?: number;
+  onRefreshLinkedPayouts?: () => void;
   isActive?: boolean;
 }) {
   const { identityToken } = useIdentityToken();
@@ -130,6 +134,7 @@ export function HistoryPanel({
   const lastHandledIncomeFocusSignatureRef = useRef<string | null>(null);
   const lastHandledOutcomeFocusSignatureRef = useRef<string | null>(null);
   const lastFocusRefreshSignatureRef = useRef<string | null>(null);
+  const lastHandledPayoutPollTickRef = useRef<number | null>(null);
   const refreshSpinHasFullTurnRef = useRef(false);
   const refreshSpinStopRequestedRef = useRef(false);
   const lastErrorToastRef = useRef<string | null>(null);
@@ -216,8 +221,9 @@ export function HistoryPanel({
     if (!currentPrivyUserId) return;
     if (didInitialLoadRef.current) return;
     didInitialLoadRef.current = true;
+    lastHandledPayoutPollTickRef.current = payoutPollTick;
     void loadHistory('initial');
-  }, [currentPrivyUserId, loadHistory]);
+  }, [currentPrivyUserId, loadHistory, payoutPollTick]);
 
   useEffect(() => {
     if (!currentPrivyUserId) return;
@@ -232,12 +238,10 @@ export function HistoryPanel({
   useEffect(() => {
     if (!currentPrivyUserId) return;
     if (loading) return;
-    const timerId = window.setInterval(() => {
-      void loadHistory('background');
-    }, 12_000);
-
-    return () => window.clearInterval(timerId);
-  }, [currentPrivyUserId, loading, loadHistory]);
+    if (lastHandledPayoutPollTickRef.current === payoutPollTick) return;
+    lastHandledPayoutPollTickRef.current = payoutPollTick;
+    void loadHistory('background');
+  }, [currentPrivyUserId, loadHistory, loading, payoutPollTick]);
   useEffect(() => {
     if (!error) {
       lastErrorToastRef.current = null;
@@ -460,7 +464,8 @@ export function HistoryPanel({
   const handleManualRefresh = useCallback(() => {
     if (refreshing || refreshIconSpinning) return;
     void loadHistory('background', { showRefreshIndicator: true });
-  }, [loadHistory, refreshIconSpinning, refreshing]);
+    onRefreshLinkedPayouts?.();
+  }, [loadHistory, onRefreshLinkedPayouts, refreshIconSpinning, refreshing]);
 
   return (
     <section className="flex h-full min-h-0 w-full flex-col gap-4 rounded-2xl border border-white/10 bg-[#111111] p-5 animate-fade-in-up">

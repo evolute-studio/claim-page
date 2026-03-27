@@ -78,6 +78,7 @@ function HistoryIcon({ active }: { active: boolean }) {
 }
 
 export default function AppPage() {
+  const PAYOUT_REFRESH_INTERVAL_MS = 10_000;
   const router = useRouter();
   const routerRef = useRef(router);
   const walletCreateAttemptedRef = useRef(false);
@@ -90,6 +91,8 @@ export default function AppPage() {
   const [focusWithdrawalRef, setFocusWithdrawalRef] = useState<string | null>(null);
   const [focusTargetTab, setFocusTargetTab] = useState<AppTab | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>('wallet');
+  const [payoutPollTick, setPayoutPollTick] = useState(0);
+  const [walletPayoutRefreshNonce, setWalletPayoutRefreshNonce] = useState(0);
   const [copied, setCopied] = useState(false);
   const [isCreatingEmbeddedWallet, setIsCreatingEmbeddedWallet] = useState(false);
   const queryFocusToken = searchParams.get('focusToken');
@@ -161,6 +164,15 @@ export default function AppPage() {
     }
   }, [isDebugPreview, queryTab]);
 
+  useEffect(() => {
+    if (!ready) return;
+    if (!isDebugPreview && !authenticated) return;
+    const timerId = window.setInterval(() => {
+      setPayoutPollTick((current) => current + 1);
+    }, PAYOUT_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timerId);
+  }, [authenticated, isDebugPreview, ready]);
+
   const buildAppUrl = useCallback(
     (
       tab: AppTab,
@@ -221,6 +233,10 @@ export default function AppPage() {
     },
     [buildAppUrl, router]
   );
+
+  const handleHistoryRefreshLinkedPayouts = useCallback(() => {
+    setWalletPayoutRefreshNonce((current) => current + 1);
+  }, []);
 
   const copyText = useCallback(async (value: string): Promise<boolean> => {
     try {
@@ -382,6 +398,8 @@ export default function AppPage() {
                 isActive={activeTab === 'wallet'}
                 focusToken={focusTargetTab === 'wallet' ? focusToken : null}
                 focusPayoutRef={focusTargetTab === 'wallet' ? focusPayoutRef : null}
+                payoutPollTick={payoutPollTick}
+                manualRefreshNonce={walletPayoutRefreshNonce}
                 debugPreview={isDebugPreview}
                 onClaimedPayoutFocus={handleClaimedPayoutFocus}
                 onCreatedWithdrawalFocus={handleCreatedWithdrawalFocus}
@@ -396,6 +414,8 @@ export default function AppPage() {
                 focusToken={focusTargetTab === 'history' ? focusToken : null}
                 focusPayoutRef={focusTargetTab === 'history' ? focusPayoutRef : null}
                 focusWithdrawalRef={focusTargetTab === 'history' ? focusWithdrawalRef : null}
+                payoutPollTick={payoutPollTick}
+                onRefreshLinkedPayouts={handleHistoryRefreshLinkedPayouts}
                 isActive={activeTab === 'history'}
               />
             </div>

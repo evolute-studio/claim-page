@@ -434,6 +434,8 @@ export function WalletPanel({
   isActive = true,
   focusToken = null,
   focusPayoutRef = null,
+  payoutPollTick = 0,
+  manualRefreshNonce = 0,
   debugPreview = false,
   onClaimedPayoutFocus,
   onCreatedWithdrawalFocus,
@@ -441,6 +443,8 @@ export function WalletPanel({
   isActive?: boolean;
   focusToken?: string | null;
   focusPayoutRef?: string | null;
+  payoutPollTick?: number;
+  manualRefreshNonce?: number;
   debugPreview?: boolean;
   onClaimedPayoutFocus?: (next: { focusToken?: string | null; focusPayoutRef?: string | null }) => void;
   onCreatedWithdrawalFocus?: (next: { focusWithdrawalRef?: string | null }) => void;
@@ -507,6 +511,8 @@ export function WalletPanel({
   const claimableHighlightTimeoutRef = useRef<number | null>(null);
   const claimableRowRefsRef = useRef<Record<string, HTMLDivElement | null>>({});
   const lastHandledClaimableFocusSignatureRef = useRef<string | null>(null);
+  const lastHandledClaimablePollTickRef = useRef<number | null>(null);
+  const lastHandledManualClaimableRefreshRef = useRef<number>(0);
   const networkIconsPreloadedRef = useRef(false);
   const submitInFlightRef = useRef(false);
   const pendingCreateRef = useRef<{
@@ -1884,12 +1890,22 @@ export function WalletPanel({
     if (debugPreview) return;
     if (!currentPrivyUserId) return;
     if (withdrawOpen) return;
+    if (lastHandledClaimablePollTickRef.current === payoutPollTick && didInitialClaimableLoadRef.current) {
+      return;
+    }
+    lastHandledClaimablePollTickRef.current = payoutPollTick;
     void loadClaimablePayouts(didInitialClaimableLoadRef.current ? 'background' : 'initial');
-    const timerId = window.setInterval(() => {
-      void loadClaimablePayouts('background');
-    }, 20_000);
-    return () => window.clearInterval(timerId);
-  }, [currentPrivyUserId, debugPreview, loadClaimablePayouts, withdrawOpen]);
+  }, [currentPrivyUserId, debugPreview, loadClaimablePayouts, payoutPollTick, withdrawOpen]);
+
+  useEffect(() => {
+    if (debugPreview) return;
+    if (!currentPrivyUserId) return;
+    if (withdrawOpen) return;
+    if (manualRefreshNonce <= 0) return;
+    if (lastHandledManualClaimableRefreshRef.current === manualRefreshNonce) return;
+    lastHandledManualClaimableRefreshRef.current = manualRefreshNonce;
+    void loadClaimablePayouts('background');
+  }, [currentPrivyUserId, debugPreview, loadClaimablePayouts, manualRefreshNonce, withdrawOpen]);
 
   useEffect(() => {
     return () => {
