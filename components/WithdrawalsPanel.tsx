@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getIdentityToken, useIdentityToken, usePrivy } from '@privy-io/react-auth';
 import { toast } from 'sonner';
+import { CopyableAddress } from '@/components/CopyableAddress';
 import { getMyWithdrawals } from '@/lib/api';
 import { getCctpConfig, getDestinationChains } from '@/lib/cctp';
 import { truncateAddress } from '@/lib/format';
@@ -266,9 +267,20 @@ export function WithdrawalsPanel() {
               </div>
               <div>
                 <p className="text-gray-500">Address</p>
-                <p className="text-gray-200">
-                  {selected.dest_address ? truncateAddress(selected.dest_address) : '—'}
-                </p>
+                {selected.dest_address ? (
+                  <CopyableAddress
+                    value={selected.dest_address}
+                    displayValue={truncateAddress(selected.dest_address)}
+                    wrapperClassName="mt-0.5 max-w-full gap-1.5"
+                    textButtonClassName="max-w-full"
+                    labelClassName="break-all text-gray-200"
+                    iconButtonClassName="h-7 w-7 text-gray-300"
+                    copiedIconButtonClassName="h-7 w-7 text-emerald-200"
+                    copyLabel="Copy destination address"
+                  />
+                ) : (
+                  <p className="text-gray-200">—</p>
+                )}
               </div>
               <div>
                 <p className="text-gray-500">Created</p>

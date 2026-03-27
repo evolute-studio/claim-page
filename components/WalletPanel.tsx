@@ -2346,7 +2346,7 @@ export function WalletPanel({
                                     href={payoutExplorerUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="font-num min-w-0 flex-1 truncate text-gray-300 hover:text-white hover:underline"
+                                    className="font-num min-w-0 flex-1 truncate text-gray-300 underline underline-offset-4 hover:text-white"
                                   >
                                     {truncateHash(item.tx_hash)}
                                   </a>

@@ -15,6 +15,7 @@ import { WalletPanel } from '@/components/WalletPanel';
 import { HistoryPanel } from '@/components/HistoryPanel';
 import { getMyPayouts } from '@/lib/api';
 import { authDebug, createAuthTraceId, isAuthDebugEnabled, tokenFingerprint } from '@/lib/authDebug';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { truncateAddress } from '@/lib/format';
 import { readJwtSub, resolvePrivyIdentityToken } from '@/lib/identityToken';
 import type { PayoutPreview } from '@/types/payout';
@@ -337,38 +338,14 @@ export default function AppPage() {
     [buildAppUrl, router]
   );
 
-  const copyText = useCallback(async (value: string): Promise<boolean> => {
-    try {
-      if (navigator.clipboard?.writeText && window.isSecureContext) {
-        await navigator.clipboard.writeText(value);
-        return true;
-      }
-      const textarea = document.createElement('textarea');
-      textarea.value = value;
-      textarea.setAttribute('readonly', '');
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      const ok = document.execCommand('copy');
-      document.body.removeChild(textarea);
-      if (!ok) {
-        throw new Error('copy failed');
-      }
-      return true;
-    } catch {
-      return false;
-    }
-  }, []);
-
   const handleCopyWalletAddress = useCallback(async () => {
     if (!walletAddress) return;
-    const ok = await copyText(walletAddress);
+    const ok = await copyTextToClipboard(walletAddress);
     setCopied(ok);
     if (ok) {
       window.setTimeout(() => setCopied(false), 1800);
     }
-  }, [copyText, walletAddress]);
+  }, [walletAddress]);
 
   if (isDebugPreview && debugScreen === 'loading') {
     return (
@@ -420,25 +397,20 @@ export default function AppPage() {
       <div className="mx-auto flex h-full w-full max-w-md flex-col px-4 pt-4">
         <header className="relative mb-4 px-1 py-1">
           <div className="flex items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={() => void handleCopyWalletAddress()}
-              disabled={!walletAddress}
-              className={`relative inline-flex h-10 min-w-0 max-w-[70%] items-center justify-center gap-2 rounded-full border bg-white/5 px-3 transition-[background-color,border-color,color,transform,opacity] duration-300 ease-out ${
-                walletAddress
-                  ? 'cursor-copy border-white/15 hover:border-white/25 hover:bg-white/10'
-                  : 'cursor-default border-white/10 opacity-70'
-              }`}
-              aria-label="Copy wallet address"
-              title={copied ? 'Copied' : 'Copy address'}
-            >
-              <span className="inline-flex min-w-0 items-center gap-1 overflow-hidden">
-                <AccountIcon />
-                <span className="truncate text-base font-semibold text-white">
-                  {walletAddress ? truncateAddress(walletAddress) : '—'}
+            {walletAddress ? (
+              <button
+                type="button"
+                onClick={() => void handleCopyWalletAddress()}
+                className="relative inline-flex h-10 min-w-0 max-w-[70%] items-center justify-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 transition-[background-color,border-color,color,transform,opacity] duration-300 ease-out hover:border-white/25 hover:bg-white/10"
+                aria-label="Copy wallet address"
+                title={copied ? 'Copied' : 'Copy address'}
+              >
+                <span className="inline-flex min-w-0 items-center gap-1 overflow-hidden">
+                  <AccountIcon />
+                  <span className="truncate text-base font-semibold text-white">
+                    {truncateAddress(walletAddress)}
+                  </span>
                 </span>
-              </span>
-              {walletAddress ? (
                 <span
                   className={`relative inline-flex h-5 w-5 shrink-0 self-center items-center justify-center transition-colors duration-300 ease-out ${
                     copied ? 'text-emerald-300' : 'text-gray-400'
@@ -460,8 +432,6 @@ export default function AppPage() {
                     <Check size={16} strokeWidth={2.1} className="block" />
                   </span>
                 </span>
-              ) : null}
-              {walletAddress ? (
                 <span
                   className={`pointer-events-none absolute left-[calc(100%+0.5rem)] top-1/2 z-20 -translate-y-1/2 whitespace-nowrap rounded-lg border border-white/20 bg-white px-2.5 py-1 text-xs font-medium text-black shadow-[0_8px_22px_rgba(0,0,0,0.35)] transition-[opacity,transform,filter] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
                     copied ? 'translate-x-0 opacity-100 blur-0' : 'translate-x-2 opacity-0 blur-[1.5px]'
@@ -469,8 +439,13 @@ export default function AppPage() {
                 >
                   Copied
                 </span>
-              ) : null}
-            </button>
+              </button>
+            ) : (
+              <div className="inline-flex h-10 min-w-0 max-w-[70%] items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 opacity-70">
+                <AccountIcon />
+                <span className="truncate text-base font-semibold text-white">—</span>
+              </div>
+            )}
 
             <button
               type="button"

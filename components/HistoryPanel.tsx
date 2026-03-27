@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { getIdentityToken, useIdentityToken, usePrivy } from '@privy-io/react-auth';
 import { ChevronDown, Inbox, RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
@@ -10,6 +10,7 @@ import { getExplorerTxUrl } from '@/lib/explorer';
 import { resolvePrivyIdentityToken } from '@/lib/identityToken';
 import { StatusBadge } from '@/components/StatusBadge';
 import { WithdrawalStatusBadge } from '@/components/WithdrawalStatusBadge';
+import { CopyableAddress } from '@/components/CopyableAddress';
 import { truncateAddress } from '@/lib/format';
 import type { PayoutPreview } from '@/types/payout';
 import type { DestinationChain, WithdrawalListItem } from '@/types/withdrawal';
@@ -79,6 +80,21 @@ function EmptyHistoryState({ view, unavailable = false }: { view: HistoryView; u
         <p className="font-num mt-2.5 text-[15px] font-medium tracking-[0.02em] text-white">{title}</p>
         <p className="mt-1 min-h-[44px] text-sm leading-5 text-gray-400">{description}</p>
       </div>
+    </div>
+  );
+}
+
+function HistoryDetailRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-3">
+      <p className="text-gray-500">{label}</p>
+      <div className="min-w-0 text-right text-gray-200">{value}</div>
     </div>
   );
 }
@@ -646,31 +662,33 @@ export function HistoryPanel({
                                 aria-hidden={!isExpanded}
                               >
                                 <div className="space-y-2">
-                                  <div className="flex items-start justify-between gap-3">
-                                    <p className="text-gray-500">Tournament</p>
-                                    <p className="truncate text-right text-gray-200">{tournamentName}</p>
-                                  </div>
-                                  <div className="flex items-start justify-between gap-3">
-                                    <p className="text-gray-500">Date</p>
-                                    <p className="text-right text-gray-200">{incomeDate}</p>
-                                  </div>
+                                  <HistoryDetailRow
+                                    label="Tournament"
+                                    value={<p className="truncate">{tournamentName}</p>}
+                                  />
+                                  <HistoryDetailRow
+                                    label="Date"
+                                    value={<p>{incomeDate}</p>}
+                                  />
                                 </div>
                                 {item.tx_hash ? (
-                                  <div className="space-y-1">
-                                    <p className="text-gray-500">Tx</p>
-                                    {incomeExplorerUrl ? (
-                                      <a
-                                        href={incomeExplorerUrl}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="break-all text-gray-300 hover:text-white hover:underline"
-                                      >
-                                        {truncateHash(item.tx_hash)}
-                                      </a>
-                                    ) : (
-                                      <p className="break-all text-gray-300">{truncateHash(item.tx_hash)}</p>
-                                    )}
-                                  </div>
+                                  <HistoryDetailRow
+                                    label="Tx"
+                                    value={
+                                      incomeExplorerUrl ? (
+                                        <a
+                                          href={incomeExplorerUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="break-all text-gray-300 underline underline-offset-4 hover:text-white"
+                                        >
+                                          {truncateHash(item.tx_hash)}
+                                        </a>
+                                      ) : (
+                                        <p className="break-all text-gray-300">{truncateHash(item.tx_hash)}</p>
+                                      )
+                                    }
+                                  />
                                 ) : null}
                                 {item.failure_reason ? (
                                   <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2">
@@ -713,9 +731,6 @@ export function HistoryPanel({
                       setExpandedOutcomeId((current) => (current === item.id ? null : item.id));
                     };
                     const destinationExplorerBase = getDestinationExplorer(item.dest_chain);
-                    const destinationValue = item.dest_address
-                      ? `${destinationLabel} • ${truncateAddress(item.dest_address)}`
-                      : destinationLabel;
                     const isDirectTransfer =
                       item.flow_type === 'direct' ||
                       (item.dest_chain === 'base' && !item.forward_tx_hash);
@@ -794,41 +809,61 @@ export function HistoryPanel({
                                 }`}
                                 aria-hidden={!isExpanded}
                               >
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div className="col-span-2">
-                                    <p className="text-gray-500">To</p>
-                                    <p className="truncate text-gray-200">{destinationValue}</p>
-                                  </div>
-                                </div>
+                                <HistoryDetailRow
+                                  label="To"
+                                  value={
+                                    item.dest_address ? (
+                                      <div className="flex flex-wrap items-baseline justify-end gap-x-1.5 gap-y-1 text-gray-200">
+                                        <span>{destinationLabel} •</span>
+                                        <CopyableAddress
+                                          value={item.dest_address}
+                                          displayValue={truncateAddress(item.dest_address)}
+                                          wrapperClassName="max-w-full items-baseline gap-1"
+                                          textButtonClassName="max-w-full items-baseline gap-1"
+                                          labelClassName="break-all text-gray-300"
+                                          iconButtonClassName="relative top-px h-4 w-4 text-gray-300"
+                                          copiedIconButtonClassName="relative top-px h-4 w-4 text-emerald-200"
+                                          copyLabel="Copy destination address"
+                                        />
+                                      </div>
+                                    ) : (
+                                      <p className="truncate">{destinationLabel}</p>
+                                    )
+                                  }
+                                />
                                 {item.burn_tx_hash ? (
-                                  <div className="space-y-1">
-                                    <p className="text-gray-500">{isDirectTransfer ? 'Transfer tx' : 'Burn tx'}</p>
-                                    <a
-                                      href={`${baseExplorer}${item.burn_tx_hash}`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="break-all text-gray-300 hover:text-white hover:underline"
-                                    >
-                                      {truncateHash(item.burn_tx_hash)}
-                                    </a>
-                                  </div>
-                                ) : null}
-                                {item.forward_tx_hash ? (
-                                  <div className="space-y-1">
-                                    <p className="text-gray-500">Mint tx</p>
-                                    {destinationExplorerBase ? (
+                                  <HistoryDetailRow
+                                    label={isDirectTransfer ? 'Transfer tx' : 'Burn tx'}
+                                    value={
                                       <a
-                                        href={`${destinationExplorerBase}${item.forward_tx_hash}`}
+                                        href={`${baseExplorer}${item.burn_tx_hash}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="break-all text-gray-300 hover:text-white hover:underline"
+                                        className="break-all text-gray-300 underline underline-offset-4 hover:text-white"
                                       >
-                                        {truncateHash(item.forward_tx_hash)}
+                                        {truncateHash(item.burn_tx_hash)}
                                       </a>
-                                    ) : (
-                                      <p className="break-all text-gray-300">{truncateHash(item.forward_tx_hash)}</p>
-                                    )}
-                                  </div>
+                                    }
+                                  />
+                                ) : null}
+                                {item.forward_tx_hash ? (
+                                  <HistoryDetailRow
+                                    label="Mint tx"
+                                    value={
+                                      destinationExplorerBase ? (
+                                        <a
+                                          href={`${destinationExplorerBase}${item.forward_tx_hash}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="break-all text-gray-300 underline underline-offset-4 hover:text-white"
+                                        >
+                                          {truncateHash(item.forward_tx_hash)}
+                                        </a>
+                                      ) : (
+                                        <p className="break-all text-gray-300">{truncateHash(item.forward_tx_hash)}</p>
+                                      )
+                                    }
+                                  />
                                 ) : null}
                                 {item.failure_reason ? (
                                   <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2">

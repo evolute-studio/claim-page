@@ -1,5 +1,6 @@
 'use client';
 
+import { CopyableAddress } from '@/components/CopyableAddress';
 import { PayoutStatus } from '@/types/payout';
 import { truncateAddress } from '@/lib/format';
 import { getExplorerTxUrl } from '@/lib/explorer';
@@ -126,7 +127,16 @@ export function ClaimCard({
           {isAuthenticated && walletAddress && (
             <div className="bg-gray-800/50 rounded-lg p-3">
               <p className="text-xs text-gray-400 mb-1">Your wallet</p>
-              <p className="text-sm text-white font-mono">{truncateAddress(walletAddress)}</p>
+              <CopyableAddress
+                value={walletAddress}
+                displayValue={truncateAddress(walletAddress)}
+                wrapperClassName="max-w-full gap-1.5"
+                textButtonClassName="max-w-full"
+                labelClassName="truncate text-sm text-white"
+                iconButtonClassName="h-7 w-7 text-gray-300"
+                copiedIconButtonClassName="h-7 w-7 text-emerald-200"
+                copyLabel="Copy wallet address"
+              />
             </div>
           )}
 
@@ -138,7 +148,7 @@ export function ClaimCard({
                 href={getExplorerTxUrl(chain, txHash)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sm text-green-400 font-mono hover:underline"
+                className="text-sm text-green-400 font-mono underline underline-offset-4"
               >
                 {truncateAddress(txHash)}
               </a>

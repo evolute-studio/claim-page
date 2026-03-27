@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useExportWallet, useModalStatus, usePrivy, useWallets } from '@privy-io/react-auth';
-import { ArrowLeft, Check, Copy, KeyRound, LogOut, Mail } from 'lucide-react';
+import { ArrowLeft, KeyRound, LogOut, Mail } from 'lucide-react';
+import { CopyableAddress } from '@/components/CopyableAddress';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { truncateAddress } from '@/lib/format';
 
@@ -48,7 +49,6 @@ export default function AccountPage() {
   const { isOpen: isPrivyModalOpen } = useModalStatus();
   const debugRaw = searchParams.get('debug')?.trim().toLowerCase() ?? '';
   const isDebugPreview = process.env.NODE_ENV !== 'production' && (debugRaw === '1' || debugRaw === 'true');
-  const [copied, setCopied] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isExportingKey, setIsExportingKey] = useState(false);
 
@@ -100,39 +100,6 @@ export default function AccountPage() {
     if (isPrivyModalOpen) return;
     setIsExportingKey(false);
   }, [isPrivyModalOpen]);
-
-  const copyText = useCallback(async (value: string): Promise<boolean> => {
-    try {
-      if (navigator.clipboard?.writeText && window.isSecureContext) {
-        await navigator.clipboard.writeText(value);
-        return true;
-      }
-      const textarea = document.createElement('textarea');
-      textarea.value = value;
-      textarea.setAttribute('readonly', '');
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      const ok = document.execCommand('copy');
-      document.body.removeChild(textarea);
-      if (!ok) {
-        throw new Error('copy failed');
-      }
-      return true;
-    } catch {
-      return false;
-    }
-  }, []);
-
-  const handleCopyWalletAddress = useCallback(async () => {
-    if (!effectiveWalletAddress) return;
-    const ok = await copyText(effectiveWalletAddress);
-    setCopied(ok);
-    if (ok) {
-      window.setTimeout(() => setCopied(false), 1800);
-    }
-  }, [copyText, effectiveWalletAddress]);
 
   const handleBack = useCallback(() => {
     if (window.history.length > 1) {
@@ -223,29 +190,28 @@ export default function AccountPage() {
               </div>
               <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2.5">
                 <div className="min-w-0">
-                  <p className="font-num truncate text-base font-semibold leading-6 text-white">
-                    {effectiveWalletAddress ? truncateAddress(effectiveWalletAddress) : 'Not connected'}
-                  </p>
+                  {effectiveWalletAddress ? (
+                    <CopyableAddress
+                      value={effectiveWalletAddress}
+                      displayValue={truncateAddress(effectiveWalletAddress)}
+                      wrapperClassName="max-w-full"
+                      textButtonClassName="max-w-full"
+                      labelClassName="truncate text-base font-semibold leading-6 text-white"
+                      iconButtonClassName="h-9 w-9"
+                      copiedIconButtonClassName="h-9 w-9"
+                      copyLabel="Copy wallet address"
+                    />
+                  ) : (
+                    <p className="font-num truncate text-base font-semibold leading-6 text-white">
+                      Not connected
+                    </p>
+                  )}
                   <p className="text-[13px] text-gray-500">
                     {embeddedWalletAddress
                       ? 'Embedded wallet'
                       : 'External wallet'}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void handleCopyWalletAddress()}
-                  disabled={!effectiveWalletAddress}
-                  className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition ${
-                    copied
-                      ? 'border-emerald-300/45 bg-emerald-400/10 text-emerald-200'
-                      : 'border-white/15 bg-white/5 text-gray-200 hover:border-white/25 hover:bg-white/10 hover:text-white'
-                  } disabled:opacity-60`}
-                  aria-label={copied ? 'Address copied' : 'Copy wallet address'}
-                  title={copied ? 'Copied' : 'Copy address'}
-                >
-                  {copied ? <Check size={16} strokeWidth={2.1} /> : <Copy size={15} strokeWidth={1.9} />}
-                </button>
               </div>
             </div>
           </section>

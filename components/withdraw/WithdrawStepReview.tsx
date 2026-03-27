@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import { Clipboard } from 'lucide-react';
 import { formatUnits } from 'viem';
+import { CopyableAddress } from '@/components/CopyableAddress';
 import { formatUsdc } from '@/lib/withdraw';
 import { truncateAddress } from '@/lib/format';
 import type { DestinationChain, WithdrawalQuoteResponse, WithdrawalStatus } from '@/types/withdrawal';
@@ -230,9 +231,16 @@ export function WithdrawStepReview({
             <div className="flex items-center justify-between">
               <span className="text-gray-400">To</span>
               {destinationAddressTrimmed && isDestinationAddressValid ? (
-                <span className="font-num text-right text-white">
-                  {truncateAddress(destinationAddressTrimmed)}
-                </span>
+                <CopyableAddress
+                  value={destinationAddressTrimmed}
+                  displayValue={truncateAddress(destinationAddressTrimmed)}
+                  wrapperClassName="max-w-[70%] gap-1.5"
+                  textButtonClassName="max-w-full justify-end"
+                  labelClassName="truncate text-right text-white"
+                  iconButtonClassName="h-7 w-7 text-gray-300"
+                  copiedIconButtonClassName="h-7 w-7 text-emerald-200"
+                  copyLabel="Copy destination address"
+                />
               ) : (
                 <span className="font-num text-right text-gray-500">
                   Not set
@@ -322,7 +330,7 @@ export function WithdrawStepReview({
               <p className="break-all">
                 {isBaseTransfer ? 'Transfer tx:' : 'Burn tx:'}{' '}
                 <a
-                  className="text-purple-300 hover:underline"
+                  className="text-purple-300 underline underline-offset-4"
                   href={`${baseExplorerBase}${burnTxHash}`}
                   target="_blank"
                   rel="noreferrer"
@@ -335,7 +343,7 @@ export function WithdrawStepReview({
               <p className="break-all">
                 Mint tx:{' '}
                 <a
-                  className="text-purple-300 hover:underline"
+                  className="text-purple-300 underline underline-offset-4"
                   href={`${destinationConfig.explorerTxBase}${forwardTxHash}`}
                   target="_blank"
                   rel="noreferrer"
