@@ -64,9 +64,9 @@ const WITHDRAW_DEBUG_ENABLED =
   (process.env.NEXT_PUBLIC_WITHDRAW_DEBUG ?? '').toLowerCase() === 'true';
 const SHOW_WITHDRAW_DEBUG_TOGGLE = false;
 const WITHDRAW_BALANCE_SOURCE =
-  (process.env.NEXT_PUBLIC_WALLET_BALANCE_SOURCE ?? 'server').trim().toLowerCase() === 'balance_of'
-    ? 'balance_of'
-    : 'server';
+  (process.env.NEXT_PUBLIC_WALLET_BALANCE_SOURCE ?? 'balance_of').trim().toLowerCase() === 'server'
+    ? 'server'
+    : 'balance_of';
 const RESUME_TOAST_GRACE_MS = 3000;
 
 type WithdrawDebugEvent = {

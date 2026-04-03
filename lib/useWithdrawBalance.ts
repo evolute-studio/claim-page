@@ -76,7 +76,7 @@ export function useWithdrawBalance({
   getAuthToken,
   enabled = true,
   refreshIntervalMs = 10_000,
-  source = 'server',
+  source = 'balance_of',
   publicClient,
   tokenAddress = null,
 }: UseWithdrawBalanceParams) {
